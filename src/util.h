@@ -22,12 +22,18 @@
  *  \brief A bunch of utility functions.
  */
 
+#include <memory>
+#include <unordered_map>
+#include <algorithm>
+
 #include <qlist.h>
 #include <ctype.h>
 #include "types.h"
 #include "sortdict.h"
 #include "docparser.h"
 #include "classdef.h"
+#include "arguments.h"
+#include "containers.h"
 
 //--------------------------------------------------------------------
 
@@ -35,23 +41,20 @@ class ClassDef;
 class FileDef;
 class MemberList;
 class NamespaceDef;
-class FileNameDict;
+class FileNameLinkedMap;
 class ArgumentList;
 class OutputList;
 class OutputDocInterface;
 class MemberDef;
 class ExampleSDict;
 class ClassSDict;
-class BaseClassList;
 class GroupDef;
 class NamespaceSDict;
 class ClassList;
 class MemberGroupSDict;
 struct TagInfo;
-class MemberNameInfoSDict;
-struct ListItemInfo;
 class PageDef;
-struct SectionInfo;
+class SectionInfo;
 class QDir;
 class Definition;
 class BufStr;
@@ -119,7 +122,6 @@ class LetterToIndexMap : public SIntDict<T>
 
 QCString langToString(SrcLangExt lang);
 QCString getLanguageSpecificSeparator(SrcLangExt lang,bool classScope=FALSE);
-QCString replaceScopeSeparator(QCString str);
 
 //--------------------------------------------------------------------
 
@@ -186,8 +188,8 @@ void writePageRef(OutputDocInterface &od,const char *cn,const char *mn);
 
 QCString getCanonicalTemplateSpec(const Definition *d,const FileDef *fs,const QCString& spec);
 
-bool matchArguments2(const Definition *srcScope,const FileDef *srcFileScope,const ArgumentList &srcAl,
-                     const Definition *dstScope,const FileDef *dstFileScope,const ArgumentList &dstAl,
+bool matchArguments2(const Definition *srcScope,const FileDef *srcFileScope,const ArgumentList *srcAl,
+                     const Definition *dstScope,const FileDef *dstFileScope,const ArgumentList *dstAl,
                      bool checkCV
                     );
 
@@ -195,9 +197,6 @@ void mergeArguments(ArgumentList &,ArgumentList &,bool forceNameOverwrite=FALSE)
 
 QCString substituteClassNames(const QCString &s);
 
-QCString substitute(const QCString &s,const QCString &src,const QCString &dst);
-QCString substitute(const QCString &s,const QCString &src,const QCString &dst,int skip_seq);
-QCString substitute(const QCString &s,char srcChar,char dstChar);
 
 QCString clearBlock(const char *s,const char *begin,const char *end);
 
@@ -207,21 +206,12 @@ QCString resolveDefines(const char *n);
 
 ClassDef *getClass(const char *key);
 
-const ClassDef *getResolvedClass(const Definition *scope,
-                           const FileDef *fileScope,
-                           const char *key,
-                           const MemberDef **pTypeDef=0,
-                           QCString *pTemplSpec=0,
-                           bool mayBeUnlinkable=FALSE,
-                           bool mayBeHidden=FALSE,
-                           QCString *pResolvedType=0);
-
 NamespaceDef *getResolvedNamespace(const char *key);
 
-FileDef *findFileDef(const FileNameDict *fnDict,const char *n,
+FileDef *findFileDef(const FileNameLinkedMap *fnMap,const char *n,
                 bool &ambig);
 
-QCString showFileDefMatches(const FileNameDict *fnDict,const char *n);
+QCString showFileDefMatches(const FileNameLinkedMap *fnMap,const char *n);
 
 int guessSection(const char *name);
 
@@ -234,7 +224,7 @@ QCString removeRedundantWhiteSpace(const QCString &s);
 
 QCString argListToString(const ArgumentList &al,bool useCanonicalType=FALSE,bool showDefVals=TRUE);
 
-QCString tempArgListToString(const ArgumentList &al,SrcLangExt lang);
+QCString tempArgListToString(const ArgumentList &al,SrcLangExt lang,bool includeDefaults=true);
 
 QCString generateMarker(int id);
 
@@ -261,9 +251,10 @@ QCString replaceAnonymousScopes(const QCString &s,const char *replacement=0);
 
 void initClassHierarchy(ClassSDict *cl);
 
-bool hasVisibleRoot(const BaseClassList *bcl);
+bool hasVisibleRoot(const BaseClassList &bcl);
 bool classHasVisibleChildren(const ClassDef *cd);
-bool namespaceHasVisibleChild(const NamespaceDef *nd,bool includeClasses,bool filterClasses,ClassDef::CompoundType ct);
+bool namespaceHasNestedNamespace(const NamespaceDef *nd);
+bool namespaceHasNestedClass(const NamespaceDef *nd,bool filterClasses,ClassDef::CompoundType ct);
 bool classVisibleInIndex(const ClassDef *cd);
 
 int minClassDistance(const ClassDef *cd,const ClassDef *bcd,int level=0);
@@ -280,6 +271,7 @@ QCString insertTemplateSpecifierInScope(const QCString &scope,const QCString &te
 QCString stripScope(const char *name);
 
 QCString convertToId(const char *s);
+QCString correctId(QCString s);
 
 QCString convertToHtml(const char *s,bool keepEntities=TRUE);
 
@@ -310,9 +302,7 @@ QCString normalizeNonTemplateArgumentsInString(
 QCString substituteTemplateArgumentsInString(
        const QCString &name,
        const ArgumentList &formalArgs,
-       const ArgumentList &actualArgs);
-
-//QList<ArgumentList> *copyArgumentLists(const QList<ArgumentList> *srcLists);
+       const std::unique_ptr<ArgumentList> &actualArgs);
 
 QCString stripTemplateSpecifiersFromScope(const QCString &fullName,
                                           bool parentOnly=TRUE,
@@ -327,15 +317,21 @@ int getScopeFragment(const QCString &s,int p,int *l);
 
 int filterCRLF(char *buf,int len);
 
-void addRefItem(const std::vector<ListItemInfo> &sli,const char *prefix,
+void addRefItem(const RefItemVector &sli,
                 const char *key,
-                const char *name,const char *title,const char *args,Definition *scope);
+                const char *prefix,
+                const char *name,
+                const char *title,
+                const char *args,
+                const Definition *scope);
 
 PageDef *addRelatedPage(const char *name,
                         const QCString &ptitle,
                         const QCString &doc,
-                        const char *fileName,int startLine,
-                        const std::vector<ListItemInfo> &sli = std::vector<ListItemInfo>(),
+                        const char *fileName,
+                        int docLine,
+                        int startLine,
+                        const RefItemVector &sli = RefItemVector(),
                         GroupDef *gd=0,
                         const TagInfo *tagInfo=0,
                         bool xref=FALSE,
@@ -348,10 +344,11 @@ QCString unescapeCharsInString(const char *s);
 void addGroupListToTitle(OutputList &ol,const Definition *d);
 
 void filterLatexString(FTextStream &t,const char *str,
-                       bool insideTabbing=FALSE,
-                       bool insidePre=FALSE,
-                       bool insideItem=FALSE,
-                       bool keepSpaces=FALSE);
+                       bool insideTabbing,
+                       bool insidePre,
+                       bool insideItem,
+                       bool insideTable,
+                       bool keepSpaces);
 
 QCString latexEscapeLabelName(const char *s);
 QCString latexEscapeIndexChars(const char *s);
@@ -371,11 +368,6 @@ QCString stripExtensionGeneral(const char *fName, const char *ext);
 QCString stripExtension(const char *fName);
 
 void replaceNamespaceAliases(QCString &scope,int i);
-
-int isAccessibleFrom(const Definition *scope,const FileDef *fileScope,const Definition *item);
-
-int isAccessibleFromWithExpScope(const Definition *scope,const FileDef *fileScope,const Definition *item,
-                     const QCString &explicitScopePart);
 
 int computeQualifiedIndex(const QCString &name);
 
@@ -399,16 +391,7 @@ QCString getFileNameExtension(QCString fn);
 void initDefaultExtensionMapping();
 void addCodeOnlyMappings();
 
-MemberDef *getMemberFromSymbol(const Definition *scope,const FileDef *fileScope,
-                                const char *n);
 bool checkIfTypedef(const Definition *scope,const FileDef *fileScope,const char *n);
-
-const ClassDef *newResolveTypedef(const FileDef *fileScope,
-                                  const MemberDef *md,
-                                  const MemberDef **pMemType=0,
-                                  QCString *pTemplSpec=0,
-                                  QCString *pResolvedType=0,
-                                  const ArgumentList *actTemplParams=0);
 
 QCString parseCommentAsText(const Definition *scope,const MemberDef *member,const QCString &doc,const QCString &fileName,int lineNr);
 
@@ -419,8 +402,6 @@ QCString recodeString(const QCString &str,const char *fromEncoding,const char *t
 QCString extractAliasArgs(const QCString &args,int pos);
 
 int countAliasArguments(const QCString argList);
-
-//QCString replaceAliasArguments(const QCString &aliasValue,const QCString &argList);
 
 QCString resolveAliasCmd(const QCString aliasCmd);
 QCString expandAlias(const QCString &aliasName,const QCString &aliasValue);
@@ -435,11 +416,11 @@ bool readInputFile(const char *fileName,BufStr &inBuf,
                    bool filter=TRUE,bool isSourceCode=FALSE);
 QCString filterTitle(const QCString &title);
 
-bool patternMatch(const QFileInfo &fi,const QStrList *patList);
+bool patternMatch(const QFileInfo &fi,const StringVector &patList);
 
-QCString externalLinkTarget();
+QCString externalLinkTarget(const bool parent = false);
 QCString externalRef(const QCString &relPath,const QCString &ref,bool href);
-int nextUtf8CharPosition(const QCString &utf8Str,int len,int startPos);
+int nextUtf8CharPosition(const QCString &utf8Str,uint len,uint startPos);
 const char *writeUtf8Char(FTextStream &t,const char *s);
 
 
@@ -469,8 +450,9 @@ QCString processMarkup(const QCString &s);
 bool protectionLevelVisible(Protection prot);
 
 QCString stripIndentation(const QCString &s);
+void stripIndentation(QCString &doc,const int indentationLevel);
 
-QCString getDotImageExtension(void);
+QCString getDotImageExtension();
 
 bool fileVisibleInIndex(const FileDef *fd,bool &genSourceFile);
 
@@ -494,8 +476,7 @@ bool openOutputFile(const char *outFile,QFile &f);
 void writeExtraLatexPackages(FTextStream &t);
 void writeLatexSpecialFormulaChars(FTextStream &t);
 
-int usedTableLevels();
-void incUsedTableLevels();
-void decUsedTableLevels();
+bool recognizeFixedForm(const char* contents, FortranFormat format);
+FortranFormat convertFileNameFortranParserCode(QCString fn);
 
 #endif

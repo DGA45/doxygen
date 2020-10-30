@@ -122,6 +122,7 @@
 \usepackage{etoc}
 \etocsettocstyle{\doxytocparskip}{\doxynormalparskip}
 \begin{document}
+\raggedbottom
 \pagenumbering{alph}
 \begin{titlepage}
 \includegraphics[width=\textwidth]{doxygen_logo}
@@ -171,6 +172,7 @@ Written by Dimitri van Heesch\\[2ex]
 \chapter{Perl Module Output}\label{perlmod}\hypertarget{perlmod}{}\input{perlmod}
 \chapter{Doxygen's internals}\label{arch}\hypertarget{arch}{}\input{arch}
 \renewcommand{\thepart}{}
+\renewcommand{\partname}{}
 \part{Appendices}
 \appendix
 %mean that subinputfrom requires a / at the end of the path
@@ -220,10 +222,6 @@ Written by Dimitri van Heesch\\[2ex]
   \doxysection{VHDL Example}\label{vhdl_example}\hypertarget{vhdl_example}{}
   \begin{DoxygenSubAppendix}
     \subinputfrom{../html/examples/mux/latex/}{refman_doc}
-  \end{DoxygenSubAppendix}
-  \doxysection{Tcl Example}\label{tcl_example}\hypertarget{tcl_example}{}
-  \begin{DoxygenSubAppendix}
-    \subinputfrom{../html/examples/tclexample/latex/}{refman_doc}
   \end{DoxygenSubAppendix}
 
 \chapter{Class Example}\label{class_example}\hypertarget{class_example}{}

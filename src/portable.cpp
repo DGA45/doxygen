@@ -196,7 +196,7 @@ int Portable::system(const char *command,const char *args,bool commandHasConsole
 
 }
 
-unsigned int Portable::pid(void)
+unsigned int Portable::pid()
 {
   unsigned int pid;
 #if !defined(_WIN32) || defined(__CYGWIN__)
@@ -206,11 +206,6 @@ unsigned int Portable::pid(void)
 #endif
   return pid;
 }
-
-#if defined(_WIN32) && !defined(__CYGWIN__)
-#else
-  static char **last_environ;
-#endif
 
 #if !defined(_WIN32) || defined(__CYGWIN__)
 void loadEnvironment()
@@ -261,9 +256,6 @@ void Portable::unsetenv(const char *variable)
     SetEnvironmentVariable(variable,0);
 #else
     /* Some systems don't have unsetenv(), so we do it ourselves */
-    size_t len;
-    char **ep;
-
     if (variable == NULL || *variable == '\0' || strchr (variable, '=') != NULL)
     {
       return; // not properly formatted
@@ -330,7 +322,7 @@ FILE *Portable::fopen(const char *fileName,const char *mode)
 #endif
 }
 
-char  Portable::pathSeparator(void)
+char  Portable::pathSeparator()
 {
 #if defined(_WIN32) && !defined(__CYGWIN__)
   return '\\';
@@ -339,7 +331,7 @@ char  Portable::pathSeparator(void)
 #endif
 }
 
-char  Portable::pathListSeparator(void)
+char  Portable::pathListSeparator()
 {
 #if defined(_WIN32) && !defined(__CYGWIN__)
   return ';';
@@ -348,8 +340,7 @@ char  Portable::pathListSeparator(void)
 #endif
 }
 
-#if defined(_WIN32) && !defined(__CYGWIN__)
-static const bool ExistsOnPath(const char *fileName)
+static bool ExistsOnPath(const char *fileName)
 {
   QFileInfo fi1(fileName);
   if (fi1.exists()) return true;
@@ -380,9 +371,22 @@ static const bool ExistsOnPath(const char *fileName)
   }
   return false;
 }
-#endif
 
-const char *Portable::ghostScriptCommand(void)
+bool Portable::checkForExecutable(const char *fileName)
+{
+#if defined(_WIN32) && !defined(__CYGWIN__)
+  char *extensions[] = {".bat",".com",".exe"};
+  for (int i = 0; i < sizeof(extensions) / sizeof(*extensions); i++)
+  {
+    if (ExistsOnPath(QCString(fileName) + extensions[i])) return true;
+  }
+  return false;
+#else
+  return ExistsOnPath(fileName);
+#endif
+}
+
+const char *Portable::ghostScriptCommand()
 {
 #if defined(_WIN32) && !defined(__CYGWIN__)
     static char *gsexe = NULL;
@@ -406,7 +410,7 @@ const char *Portable::ghostScriptCommand(void)
 #endif
 }
 
-const char *Portable::commandExtension(void)
+const char *Portable::commandExtension()
 {
 #if defined(_WIN32) && !defined(__CYGWIN__)
     return ".exe";
@@ -415,7 +419,7 @@ const char *Portable::commandExtension(void)
 #endif
 }
 
-bool Portable::fileSystemIsCaseSensitive(void)
+bool Portable::fileSystemIsCaseSensitive()
 {
 #if defined(_WIN32) || defined(macintosh) || defined(__MACOSX__) || defined(__APPLE__) || defined(__CYGWIN__)
   return FALSE;
@@ -442,17 +446,17 @@ int Portable::pclose(FILE *stream)
   #endif
 }
 
-void Portable::sysTimerStart(void)
+void Portable::sysTimerStart()
 {
   g_time.start();
 }
 
-void Portable::sysTimerStop(void)
+void Portable::sysTimerStop()
 {
   g_sysElapsedTime+=((double)g_time.elapsed())/1000.0;
 }
 
-double Portable::getSysElapsedTime(void)
+double Portable::getSysElapsedTime()
 {
   return g_sysElapsedTime;
 }
@@ -488,7 +492,7 @@ bool Portable::isAbsolutePath(const char *fileName)
  *
  * This routine was inspired by the cause for bug 766059 was that in the Windows path there were forward slashes.
  */
-void Portable::correct_path(void)
+void Portable::correct_path()
 {
 #if defined(_WIN32) && !defined(__CYGWIN__)
   const char *p = Portable::getenv("PATH");
@@ -507,7 +511,7 @@ void Portable::unlink(const char *fileName)
 #endif
 }
 
-void Portable::setShortDir(void)
+void Portable::setShortDir()
 {
 #if defined(_WIN32) && !defined(__CYGWIN__)
   long     length = 0;
@@ -566,4 +570,13 @@ const char *Portable::strnstr(const char *haystack, const char *needle, size_t h
     }
   }
   return 0;
+}
+
+const char *Portable::devNull()
+{
+#if defined(_WIN32) && !defined(__CYGWIN__)
+  return "NUL";
+#else
+  return "/dev/null";
+#endif
 }

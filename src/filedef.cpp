@@ -1,12 +1,12 @@
 /******************************************************************************
  *
- * 
+ *
  *
  * Copyright (C) 1997-2015 by Dimitri van Heesch.
  *
  * Permission to use, copy, modify, and distribute this software and its
- * documentation under the terms of the GNU General Public License is hereby 
- * granted. No representations are made about the suitability of this software 
+ * documentation under the terms of the GNU General Public License is hereby
+ * granted. No representations are made about the suitability of this software
  * for any purpose. It is provided "as is" without express or implied warranty.
  * See the GNU General Public License for more details.
  *
@@ -55,7 +55,8 @@ class FileDefImpl : public DefinitionImpl, public FileDef
     virtual ~FileDefImpl();
 
     virtual DefType definitionType() const { return TypeFile; }
-    virtual QCString name() const;
+    virtual const QCString &name() const;
+
     virtual QCString displayName(bool=TRUE) const { return name(); }
     virtual QCString fileName() const { return m_fileName; }
     virtual QCString getOutputFileBase() const;
@@ -78,10 +79,10 @@ class FileDefImpl : public DefinitionImpl, public FileDef
     virtual PackageDef *packageDef() const { return m_package; }
     virtual DirDef *getDirDef() const      { return m_dir; }
     virtual NamespaceSDict *getUsedNamespaces() const;
-    virtual SDict<Definition> *getUsedClasses() const      { return m_usingDeclList; }
+    virtual LinkedRefMap<const ClassDef> getUsedClasses() const  { return m_usingDeclList; }
     virtual QList<IncludeInfo> *includeFileList() const    { return m_includeList; }
     virtual QList<IncludeInfo> *includedByFileList() const { return m_includedByList; }
-    virtual void getAllIncludeFilesRecursively(QStrList &incFiles) const;
+    virtual void getAllIncludeFilesRecursively(StringVector &incFiles) const;
     virtual MemberList *getMemberList(MemberListType lt) const;
     virtual const QList<MemberList> &getMemberLists() const { return m_memberLists; }
     virtual MemberGroupSDict *getMemberGroupSDict() const { return m_memberGroupSDict; }
@@ -100,10 +101,10 @@ class FileDefImpl : public DefinitionImpl, public FileDef
     virtual void writeQuickMemberLinks(OutputList &ol,const MemberDef *currentMd) const;
     virtual void writeSummaryLinks(OutputList &ol) const;
     virtual void writeTagFile(FTextStream &t);
-    virtual void startParsing();
-    virtual void writeSource(OutputList &ol,bool sameTu,QStrList &filesInSameTu);
-    virtual void parseSource(bool sameTu,QStrList &filesInSameTu);
-    virtual void finishParsing();
+    virtual void writeSourceHeader(OutputList &ol);
+    virtual void writeSourceBody(OutputList &ol,ClangTUParser *clangParser);
+    virtual void writeSourceFooter(OutputList &ol);
+    virtual void parseSource(ClangTUParser *clangParser);
     virtual void setDiskName(const QCString &name);
     virtual void insertMember(MemberDef *md);
     virtual void insertClass(ClassDef *cd);
@@ -112,11 +113,11 @@ class FileDefImpl : public DefinitionImpl, public FileDef
     virtual void setPackageDef(PackageDef *pd) { m_package=pd; }
     virtual void setDirDef(DirDef *dd) { m_dir=dd; }
     virtual void addUsingDirective(const NamespaceDef *nd);
-    virtual void addUsingDeclaration(Definition *def);
+    virtual void addUsingDeclaration(const ClassDef *cd);
     virtual void combineUsingRelations();
     virtual bool generateSourceFile() const;
     virtual void sortMemberLists();
-    virtual void addIncludeDependency(FileDef *fd,const char *incName,bool local,bool imported,bool indirect);
+    virtual void addIncludeDependency(FileDef *fd,const char *incName,bool local,bool imported);
     virtual void addIncludedByDependency(FileDef *fd,const char *incName,bool local,bool imported);
     virtual void addMembersToMemberGroup();
     virtual void distributeMemberGroupDocumentation();
@@ -156,7 +157,7 @@ class FileDefImpl : public DefinitionImpl, public FileDef
     QDict<IncludeInfo>   *m_includedByDict;
     QList<IncludeInfo>   *m_includedByList;
     NamespaceSDict       *m_usingDirList;
-    SDict<Definition>    *m_usingDeclList;
+    LinkedRefMap<const ClassDef> m_usingDeclList;
     QCString              m_path;
     QCString              m_filePath;
     QCString              m_inclDepFileName;
@@ -209,11 +210,13 @@ class DevNullCodeDocInterface : public CodeOutputInterface
     virtual void linkableSymbol(int, const char *,Definition *,Definition *) {}
     virtual void setCurrentDoc(const Definition *,const char *,bool) {}
     virtual void addWord(const char *,bool) {}
+    virtual void startCodeFragment(const char *) {}
+    virtual void endCodeFragment(const char *) {}
 };
 
 //---------------------------------------------------------------------------
 
-/*! create a new file definition, where \a p is the file path, 
+/*! create a new file definition, where \a p is the file path,
     \a nm the file name, and \a lref is an HTML anchor name if the
     file was read from a tag file or 0 otherwise
 */
@@ -231,16 +234,15 @@ FileDefImpl::FileDefImpl(const char *p,const char *nm,
   m_structSDict       = 0;
   m_exceptionSDict    = 0;
   m_includeList       = 0;
-  m_includeDict       = 0; 
+  m_includeDict       = 0;
   m_includedByList    = 0;
-  m_includedByDict    = 0; 
-  m_namespaceSDict    = 0; 
+  m_includedByDict    = 0;
+  m_namespaceSDict    = 0;
   m_srcDefDict        = 0;
   m_srcMemberDict     = 0;
   m_usingDirList      = 0;
-  m_usingDeclList     = 0;
   m_package           = 0;
-  m_isSource          = guessSection(nm)==Entry::SOURCE_SEC; 
+  m_isSource          = guessSection(nm)==Entry::SOURCE_SEC;
   m_docname           = nm;
   m_dir               = 0;
   m_visited           = FALSE;
@@ -269,7 +271,6 @@ FileDefImpl::~FileDefImpl()
   delete m_srcDefDict;
   delete m_srcMemberDict;
   delete m_usingDirList;
-  delete m_usingDeclList;
   delete m_memberGroupSDict;
 }
 
@@ -289,7 +290,7 @@ void FileDefImpl::setDiskName(const QCString &name)
   }
 }
 
-/*! Compute the HTML anchor names for all members in the class */ 
+/*! Compute the HTML anchor names for all members in the class */
 void FileDefImpl::computeAnchors()
 {
   MemberList *ml = getMemberList(MemberListType_allMembersList);
@@ -312,6 +313,7 @@ void FileDefImpl::distributeMemberGroupDocumentation()
 
 void FileDefImpl::findSectionsInDocumentation()
 {
+  docFindSections(briefDescription(),this,docFile());
   docFindSections(documentation(),this,docFile());
   if (m_memberGroupSDict)
   {
@@ -338,7 +340,7 @@ bool FileDefImpl::hasDetailedDescription() const
 {
   static bool repeatBrief = Config_getBool(REPEAT_BRIEF);
   static bool sourceBrowser = Config_getBool(SOURCE_BROWSER);
-  return ((!briefDescription().isEmpty() && repeatBrief) || 
+  return ((!briefDescription().isEmpty() && repeatBrief) ||
           !documentation().stripWhiteSpace().isEmpty() || // avail empty section
           (sourceBrowser && getStartBodyLine()!=-1 && getBodyDef())
          );
@@ -349,32 +351,29 @@ void FileDefImpl::writeTagFile(FTextStream &tagFile)
   tagFile << "  <compound kind=\"file\">" << endl;
   tagFile << "    <name>" << convertToXML(name()) << "</name>" << endl;
   tagFile << "    <path>" << convertToXML(getPath()) << "</path>" << endl;
-  tagFile << "    <filename>" << convertToXML(addHtmlExtensionIfMissing(getOutputFileBase())) << "</filename>" << endl;
+  tagFile << "    <filename>" << convertToXML(getOutputFileBase()) << Doxygen::htmlFileExtension << "</filename>" << endl;
   if (m_includeList && m_includeList->count()>0)
   {
     QListIterator<IncludeInfo> ili(*m_includeList);
     IncludeInfo *ii;
     for (;(ii=ili.current());++ili)
     {
-      if (!ii->indirect)
+      FileDef *fd=ii->fileDef;
+      if (fd && fd->isLinkable() && !fd->isReference())
       {
-        FileDef *fd=ii->fileDef;
-        if (fd && fd->isLinkable() && !fd->isReference()) 
-        {
-          bool isIDLorJava = FALSE;
-          SrcLangExt lang = fd->getLanguage();
-          isIDLorJava = lang==SrcLangExt_IDL || lang==SrcLangExt_Java;
-          const char *locStr = (ii->local    || isIDLorJava) ? "yes" : "no";
-          const char *impStr = (ii->imported || isIDLorJava) ? "yes" : "no";
-          tagFile << "    <includes id=\"" 
-                  << convertToXML(fd->getOutputFileBase()) << "\" "
-                  << "name=\"" << convertToXML(fd->name()) << "\" "
-                  << "local=\"" << locStr << "\" "
-                  << "imported=\"" << impStr << "\">"
-                  << convertToXML(ii->includeName)
-                  << "</includes>" 
-                  << endl;
-        }
+        bool isIDLorJava = FALSE;
+        SrcLangExt lang = fd->getLanguage();
+        isIDLorJava = lang==SrcLangExt_IDL || lang==SrcLangExt_Java;
+        const char *locStr = (ii->local    || isIDLorJava) ? "yes" : "no";
+        const char *impStr = (ii->imported || isIDLorJava) ? "yes" : "no";
+        tagFile << "    <includes id=\""
+          << convertToXML(fd->getOutputFileBase()) << "\" "
+          << "name=\"" << convertToXML(fd->name()) << "\" "
+          << "local=\"" << locStr << "\" "
+          << "imported=\"" << impStr << "\">"
+          << convertToXML(ii->includeName)
+          << "</includes>"
+          << endl;
       }
     }
   }
@@ -467,7 +466,7 @@ void FileDefImpl::writeDetailedDescription(OutputList &ol,const QCString &title)
     ol.popGeneratorState();
     ol.pushGeneratorState();
       ol.disableAllBut(OutputGenerator::Html);
-      ol.writeAnchor(0,"details"); 
+      ol.writeAnchor(0,"details");
     ol.popGeneratorState();
     ol.startGroupHeader();
     ol.parseText(title);
@@ -476,9 +475,10 @@ void FileDefImpl::writeDetailedDescription(OutputList &ol,const QCString &title)
     ol.startTextBlock();
     if (!briefDescription().isEmpty() && Config_getBool(REPEAT_BRIEF))
     {
-      ol.generateDoc(briefFile(),briefLine(),this,0,briefDescription(),FALSE,FALSE);
+      ol.generateDoc(briefFile(),briefLine(),this,0,briefDescription(),FALSE,FALSE,
+                     0,FALSE,FALSE,Config_getBool(MARKDOWN_SUPPORT));
     }
-    if (!briefDescription().isEmpty() && Config_getBool(REPEAT_BRIEF) && 
+    if (!briefDescription().isEmpty() && Config_getBool(REPEAT_BRIEF) &&
         !documentation().isEmpty())
     {
       ol.pushGeneratorState();
@@ -493,23 +493,24 @@ void FileDefImpl::writeDetailedDescription(OutputList &ol,const QCString &title)
     }
     if (!documentation().isEmpty())
     {
-      ol.generateDoc(docFile(),docLine(),this,0,documentation()+"\n",TRUE,FALSE);
+      ol.generateDoc(docFile(),docLine(),this,0,documentation()+"\n",TRUE,FALSE,
+                     0,FALSE,FALSE,Config_getBool(MARKDOWN_SUPPORT));
     }
     //printf("Writing source ref for file %s\n",name().data());
-    if (Config_getBool(SOURCE_BROWSER)) 
+    if (Config_getBool(SOURCE_BROWSER))
     {
       //if Latex enabled and LATEX_SOURCE_CODE isn't -> skip, bug_738548
       ol.pushGeneratorState();
       if (ol.isEnabled(OutputGenerator::Latex) && !Config_getBool(LATEX_SOURCE_CODE))
-      { 
+      {
         ol.disable(OutputGenerator::Latex);
       }
       if (ol.isEnabled(OutputGenerator::Docbook) && !Config_getBool(DOCBOOK_PROGRAMLISTING))
-      { 
+      {
         ol.disable(OutputGenerator::Docbook);
       }
       if (ol.isEnabled(OutputGenerator::RTF) && !Config_getBool(RTF_SOURCE_CODE))
-      { 
+      {
         ol.disable(OutputGenerator::RTF);
       }
 
@@ -541,7 +542,8 @@ void FileDefImpl::writeBriefDescription(OutputList &ol)
   if (hasBriefDescription())
   {
     DocRoot *rootNode = validatingParseDoc(briefFile(),briefLine(),this,0,
-                       briefDescription(),TRUE,FALSE,0,TRUE,FALSE);
+                       briefDescription(),TRUE,FALSE,
+                       0,TRUE,FALSE,Config_getBool(MARKDOWN_SUPPORT));
 
     if (rootNode && !rootNode->isEmpty())
     {
@@ -596,61 +598,58 @@ void FileDefImpl::writeIncludeFiles(OutputList &ol)
     IncludeInfo *ii;
     for (;(ii=ili.current());++ili)
     {
-      if (!ii->indirect)
+      FileDef *fd=ii->fileDef;
+      bool isIDLorJava = FALSE;
+      if (fd)
       {
-        FileDef *fd=ii->fileDef;
-        bool isIDLorJava = FALSE;
-        if (fd)
-        {
-          SrcLangExt lang   = fd->getLanguage();
-          isIDLorJava = lang==SrcLangExt_IDL || lang==SrcLangExt_Java;
-        }
-        ol.startTypewriter();
-        if (isIDLorJava) // IDL/Java include
-        {
-          ol.docify("import ");
-        }
-        else if (ii->imported) // Objective-C include
-        {
-          ol.docify("#import ");
-        }
-        else // C/C++ include
-        {
-          ol.docify("#include ");
-        }
-        if (ii->local || isIDLorJava)
-          ol.docify("\"");
-        else
-          ol.docify("<");
-        ol.disable(OutputGenerator::Html);
-        ol.docify(ii->includeName);
-        ol.enableAll();
-        ol.disableAllBut(OutputGenerator::Html);
-        
-        // Here we use the include file name as it appears in the file.
-        // we could also we the name as it is used within doxygen,
-        // then we should have used fd->docName() instead of ii->includeName
-        if (fd && fd->isLinkable())
-        {
-          ol.writeObjectLink(fd->getReference(),
-              fd->generateSourceFile() ? fd->includeName() : fd->getOutputFileBase(),
-              0,ii->includeName);
-        }
-        else
-        {
-          ol.docify(ii->includeName);
-        }
-        
-        ol.enableAll();
-        if (ii->local || isIDLorJava)
-          ol.docify("\"");
-        else
-          ol.docify(">");
-        if (isIDLorJava) 
-          ol.docify(";");
-        ol.endTypewriter();
-        ol.lineBreak();
+        SrcLangExt lang   = fd->getLanguage();
+        isIDLorJava = lang==SrcLangExt_IDL || lang==SrcLangExt_Java;
       }
+      ol.startTypewriter();
+      if (isIDLorJava) // IDL/Java include
+      {
+        ol.docify("import ");
+      }
+      else if (ii->imported) // Objective-C include
+      {
+        ol.docify("#import ");
+      }
+      else // C/C++ include
+      {
+        ol.docify("#include ");
+      }
+      if (ii->local || isIDLorJava)
+        ol.docify("\"");
+      else
+        ol.docify("<");
+      ol.disable(OutputGenerator::Html);
+      ol.docify(ii->includeName);
+      ol.enableAll();
+      ol.disableAllBut(OutputGenerator::Html);
+
+      // Here we use the include file name as it appears in the file.
+      // we could also we the name as it is used within doxygen,
+      // then we should have used fd->docName() instead of ii->includeName
+      if (fd && fd->isLinkable())
+      {
+        ol.writeObjectLink(fd->getReference(),
+            fd->generateSourceFile() ? fd->includeName() : fd->getOutputFileBase(),
+            0,ii->includeName);
+      }
+      else
+      {
+        ol.docify(ii->includeName);
+      }
+
+      ol.enableAll();
+      if (ii->local || isIDLorJava)
+        ol.docify("\"");
+      else
+        ol.docify(">");
+      if (isIDLorJava)
+        ol.docify(";");
+      ol.endTypewriter();
+      ol.lineBreak();
     }
     ol.endTextBlock();
   }
@@ -669,7 +668,7 @@ void FileDefImpl::writeIncludeGraph(OutputList &ol)
     }
     else if (!incDepGraph.isTrivial())
     {
-      ol.startTextBlock(); 
+      ol.startTextBlock();
       ol.disable(OutputGenerator::Man);
       ol.startInclDepGraph();
       ol.parseText(theTranslator->trInclDepGraph(name()));
@@ -694,7 +693,7 @@ void FileDefImpl::writeIncludedByGraph(OutputList &ol)
     }
     else if (!incDepGraph.isTrivial())
     {
-      ol.startTextBlock(); 
+      ol.startTextBlock();
       ol.disable(OutputGenerator::Man);
       ol.startInclDepGraph();
       ol.parseText(theTranslator->trInclByDepGraph());
@@ -786,7 +785,7 @@ void FileDefImpl::writeMemberGroups(OutputList &ol)
     MemberGroup *mg;
     for (;(mg=mgli.current());++mgli)
     {
-      if ((!mg->allMembersInSameSection() || !m_subGrouping) 
+      if ((!mg->allMembersInSameSection() || !m_subGrouping)
           && mg->header()!="[NOHEADER]")
       {
         mg->writeDeclarations(ol,0,0,this,0);
@@ -872,13 +871,13 @@ void FileDefImpl::writeSummaryLinks(OutputList &ol) const
 }
 
 /*! Write the documentation page for this file to the file of output
-    generators \a ol. 
+    generators \a ol.
 */
 void FileDefImpl::writeDocumentation(OutputList &ol)
 {
   static bool generateTreeView = Config_getBool(GENERATE_TREEVIEW);
   //funcList->countDecMembers();
-  
+
   //QCString fn = name();
   //if (Config_getBool(FULL_PATH_NAMES))
   //{
@@ -886,7 +885,7 @@ void FileDefImpl::writeDocumentation(OutputList &ol)
   //}
 
   //printf("WriteDocumentation diskname=%s\n",diskname.data());
-  
+
   QCString versionTitle;
   if (!m_fileVersion.isEmpty())
   {
@@ -938,16 +937,16 @@ void FileDefImpl::writeDocumentation(OutputList &ol)
     ol.endProjectNumber();
     ol.enableAll();
   }
-  
+
   if (Doxygen::searchIndex)
   {
     Doxygen::searchIndex->setCurrentDoc(this,anchor(),FALSE);
     Doxygen::searchIndex->addWord(localName(),TRUE);
   }
-  
+
 
   //---------------------------------------- start flexible part -------------------------------
-  
+
   SrcLangExt lang = getLanguage();
   QListIterator<LayoutDocEntry> eli(
       LayoutDocManager::instance().docEntries(LayoutDocManager::File));
@@ -956,12 +955,12 @@ void FileDefImpl::writeDocumentation(OutputList &ol)
   {
     switch (lde->kind())
     {
-      case LayoutDocEntry::BriefDesc: 
+      case LayoutDocEntry::BriefDesc:
         writeBriefDescription(ol);
-        break; 
-      case LayoutDocEntry::MemberDeclStart: 
+        break;
+      case LayoutDocEntry::MemberDeclStart:
         startMemberDeclarations(ol);
-        break; 
+        break;
       case LayoutDocEntry::FileIncludes:
         writeIncludeFiles(ol);
         break;
@@ -974,76 +973,76 @@ void FileDefImpl::writeDocumentation(OutputList &ol)
       case LayoutDocEntry::FileSourceLink:
         writeSourceLink(ol);
         break;
-      case LayoutDocEntry::FileClasses: 
+      case LayoutDocEntry::FileClasses:
         {
           LayoutDocEntrySection *ls = (LayoutDocEntrySection*)lde;
           writeClassDeclarations(ol,ls->title(lang),m_classSDict);
         }
         break;
-      case LayoutDocEntry::FileInterfaces: 
+      case LayoutDocEntry::FileInterfaces:
         {
           LayoutDocEntrySection *ls = (LayoutDocEntrySection*)lde;
           writeClassDeclarations(ol,ls->title(lang),m_interfaceSDict);
         }
         break;
-      case LayoutDocEntry::FileStructs: 
+      case LayoutDocEntry::FileStructs:
         {
           LayoutDocEntrySection *ls = (LayoutDocEntrySection*)lde;
           writeClassDeclarations(ol,ls->title(lang),m_structSDict);
         }
         break;
-      case LayoutDocEntry::FileExceptions: 
+      case LayoutDocEntry::FileExceptions:
         {
           LayoutDocEntrySection *ls = (LayoutDocEntrySection*)lde;
           writeClassDeclarations(ol,ls->title(lang),m_exceptionSDict);
         }
         break;
-      case LayoutDocEntry::FileNamespaces: 
+      case LayoutDocEntry::FileNamespaces:
         {
           LayoutDocEntrySection *ls = (LayoutDocEntrySection*)lde;
           writeNamespaceDeclarations(ol,ls->title(lang),false);
         }
-        break; 
+        break;
       case LayoutDocEntry::FileConstantGroups:
         {
           LayoutDocEntrySection *ls = (LayoutDocEntrySection*)lde;
           writeNamespaceDeclarations(ol,ls->title(lang),true);
         }
         break;
-      case LayoutDocEntry::MemberGroups: 
+      case LayoutDocEntry::MemberGroups:
         writeMemberGroups(ol);
-        break; 
-      case LayoutDocEntry::MemberDecl: 
+        break;
+      case LayoutDocEntry::MemberDecl:
         {
           LayoutDocEntryMemberDecl *lmd = (LayoutDocEntryMemberDecl*)lde;
           writeMemberDeclarations(ol,lmd->type,lmd->title(lang));
         }
-        break; 
-      case LayoutDocEntry::MemberDeclEnd: 
+        break;
+      case LayoutDocEntry::MemberDeclEnd:
         endMemberDeclarations(ol);
         break;
-      case LayoutDocEntry::DetailedDesc: 
+      case LayoutDocEntry::DetailedDesc:
         {
           LayoutDocEntrySection *ls = (LayoutDocEntrySection*)lde;
           writeDetailedDescription(ol,ls->title(lang));
         }
         break;
-      case LayoutDocEntry::MemberDefStart: 
+      case LayoutDocEntry::MemberDefStart:
         startMemberDocumentation(ol);
-        break; 
+        break;
       case LayoutDocEntry::FileInlineClasses:
         writeInlineClasses(ol);
         break;
-      case LayoutDocEntry::MemberDef: 
+      case LayoutDocEntry::MemberDef:
         {
           LayoutDocEntryMemberDef *lmd = (LayoutDocEntryMemberDef*)lde;
           writeMemberDocumentation(ol,lmd->type,lmd->title(lang));
         }
         break;
-      case LayoutDocEntry::MemberDefEnd: 
+      case LayoutDocEntry::MemberDefEnd:
         endMemberDocumentation(ol);
         break;
-      case LayoutDocEntry::AuthorSection: 
+      case LayoutDocEntry::AuthorSection:
         writeAuthorSection(ol);
         break;
       case LayoutDocEntry::ClassIncludes:
@@ -1060,13 +1059,13 @@ void FileDefImpl::writeDocumentation(OutputList &ol)
       case LayoutDocEntry::NamespaceStructs:
       case LayoutDocEntry::NamespaceExceptions:
       case LayoutDocEntry::NamespaceInlineClasses:
-      case LayoutDocEntry::GroupClasses: 
-      case LayoutDocEntry::GroupInlineClasses: 
+      case LayoutDocEntry::GroupClasses:
+      case LayoutDocEntry::GroupInlineClasses:
       case LayoutDocEntry::GroupNamespaces:
-      case LayoutDocEntry::GroupDirs: 
-      case LayoutDocEntry::GroupNestedGroups: 
+      case LayoutDocEntry::GroupDirs:
+      case LayoutDocEntry::GroupNestedGroups:
       case LayoutDocEntry::GroupFiles:
-      case LayoutDocEntry::GroupGraph: 
+      case LayoutDocEntry::GroupGraph:
       case LayoutDocEntry::GroupPageDocs:
       case LayoutDocEntry::DirSubDirs:
       case LayoutDocEntry::DirFiles:
@@ -1095,7 +1094,7 @@ void FileDefImpl::writeMemberPages(OutputList &ol)
 {
   ol.pushGeneratorState();
   ol.disableAllBut(OutputGenerator::Html);
-  
+
   QListIterator<MemberList> mli(m_memberLists);
   MemberList *ml;
   for (mli.toFirst();(ml=mli.current());++mli)
@@ -1153,14 +1152,12 @@ void FileDefImpl::writeQuickMemberLinks(OutputList &ol,const MemberDef *currentM
 }
 
 /*! Write a source listing of this file to the output */
-void FileDefImpl::writeSource(OutputList &ol,bool sameTu,QStrList &filesInSameTu)
+void FileDefImpl::writeSourceHeader(OutputList &ol)
 {
-  static bool generateTreeView  = Config_getBool(GENERATE_TREEVIEW);
-  static bool filterSourceFiles = Config_getBool(FILTER_SOURCE_FILES);
-  static bool latexSourceCode   = Config_getBool(LATEX_SOURCE_CODE);
-  static bool docbookSourceCode = Config_getBool(DOCBOOK_PROGRAMLISTING);
-  static bool rtfSourceCode     = Config_getBool(RTF_SOURCE_CODE);
-  DevNullCodeDocInterface devNullIntf;
+  bool generateTreeView  = Config_getBool(GENERATE_TREEVIEW);
+  bool latexSourceCode   = Config_getBool(LATEX_SOURCE_CODE);
+  bool docbookSourceCode = Config_getBool(DOCBOOK_PROGRAMLISTING);
+  bool rtfSourceCode     = Config_getBool(RTF_SOURCE_CODE);
   QCString title = m_docname;
   if (!m_fileVersion.isEmpty())
   {
@@ -1210,33 +1207,28 @@ void FileDefImpl::writeSource(OutputList &ol,bool sameTu,QStrList &filesInSameTu
     ol.endTextLink();
     ol.popGeneratorState();
   }
+}
 
-  (void)sameTu;
-  (void)filesInSameTu;
+void FileDefImpl::writeSourceBody(OutputList &ol,ClangTUParser *clangParser)
+{
+  bool filterSourceFiles = Config_getBool(FILTER_SOURCE_FILES);
+  DevNullCodeDocInterface devNullIntf;
 #if USE_LIBCLANG
-  static bool clangAssistedParsing = Config_getBool(CLANG_ASSISTED_PARSING);
-  if (clangAssistedParsing && 
+  if (Doxygen::clangAssistedParsing && clangParser &&
       (getLanguage()==SrcLangExt_Cpp || getLanguage()==SrcLangExt_ObjC))
   {
-    ol.startCodeFragment();
-    if (!sameTu)
-    {
-      ClangParser::instance()->start(absFilePath(),filesInSameTu);
-    }
-    else
-    {
-      ClangParser::instance()->switchToFile(absFilePath());
-    }
-    ClangParser::instance()->writeSources(ol,this);
-    ol.endCodeFragment();
+    ol.startCodeFragment("DoxyCode");
+    clangParser->switchToFile(this);
+    clangParser->writeSources(ol,this);
+    ol.endCodeFragment("DoxyCode");
   }
   else
 #endif
   {
-    CodeParserInterface &intf = Doxygen::parserManager->getCodeParser(getDefFileExtension());
-    intf.resetCodeParserState();
-    ol.startCodeFragment();
-    bool needs2PassParsing = 
+    auto intf = Doxygen::parserManager->getCodeParser(getDefFileExtension());
+    intf->resetCodeParserState();
+    ol.startCodeFragment("DoxyCode");
+    bool needs2PassParsing =
         Doxygen::parseSourcesNeeded &&                // we need to parse (filtered) sources for cross-references
         !filterSourceFiles &&                         // but user wants to show sources as-is
         !getFileFilter(absFilePath(),TRUE).isEmpty(); // and there is a filter used while parsing
@@ -1244,13 +1236,13 @@ void FileDefImpl::writeSource(OutputList &ol,bool sameTu,QStrList &filesInSameTu
     if (needs2PassParsing)
     {
       // parse code for cross-references only (see bug707641)
-      intf.parseCode(devNullIntf,0,
+      intf->parseCode(devNullIntf,0,
                        fileToString(absFilePath(),TRUE,TRUE),
                        getLanguage(),
                        FALSE,0,this
                       );
     }
-    intf.parseCode(ol,0,
+    intf->parseCode(ol,0,
         fileToString(absFilePath(),filterSourceFiles,TRUE),
         getLanguage(),      // lang
         FALSE,              // isExampleBlock
@@ -1264,55 +1256,40 @@ void FileDefImpl::writeSource(OutputList &ol,bool sameTu,QStrList &filesInSameTu
         0,                  // searchCtx
         !needs2PassParsing  // collectXRefs
         );
-    ol.endCodeFragment();
+    ol.endCodeFragment("DoxyCode");
   }
+}
+
+void FileDefImpl::writeSourceFooter(OutputList &ol)
+{
   ol.endContents();
   endFileWithNavPath(this,ol);
   ol.enableAll();
 }
 
-void FileDefImpl::parseSource(bool sameTu,QStrList &filesInSameTu)
+void FileDefImpl::parseSource(ClangTUParser *clangParser)
 {
   static bool filterSourceFiles = Config_getBool(FILTER_SOURCE_FILES);
   DevNullCodeDocInterface devNullIntf;
-  (void)sameTu;
-  (void)filesInSameTu;
 #if USE_LIBCLANG
-  static bool clangAssistedParsing = Config_getBool(CLANG_ASSISTED_PARSING);
-  if (clangAssistedParsing && 
+  if (Doxygen::clangAssistedParsing && clangParser &&
       (getLanguage()==SrcLangExt_Cpp || getLanguage()==SrcLangExt_ObjC))
   {
-    if (!sameTu)
-    {
-      ClangParser::instance()->start(absFilePath(),filesInSameTu);
-    }
-    else
-    {
-      ClangParser::instance()->switchToFile(absFilePath());
-    }
-    ClangParser::instance()->writeSources(devNullIntf,this);
+    clangParser->switchToFile(this);
+    clangParser->writeSources(devNullIntf,this);
   }
   else
 #endif
   {
-    CodeParserInterface &intf = Doxygen::parserManager->getCodeParser(getDefFileExtension());
-    intf.resetCodeParserState();
-    intf.parseCode(
+    auto intf = Doxygen::parserManager->getCodeParser(getDefFileExtension());
+    intf->resetCodeParserState();
+    intf->parseCode(
             devNullIntf,0,
             fileToString(absFilePath(),filterSourceFiles,TRUE),
             getLanguage(),
             FALSE,0,this
            );
   }
-}
-
-void FileDefImpl::startParsing()
-{
-}
-
-void FileDefImpl::finishParsing()
-{
-  ClangParser::instance()->finish();
 }
 
 void FileDefImpl::addMembersToMemberGroup()
@@ -1351,7 +1328,7 @@ void FileDefImpl::insertMember(MemberDef *md)
   //    name().data(),md->name().data(),md,allMemberList.count());
   MemberList *allMemberList = getMemberList(MemberListType_allMembersList);
   if (allMemberList && allMemberList->findRef(md)!=-1)  // TODO optimize the findRef!
-  { 
+  {
     return;
   }
 
@@ -1360,38 +1337,38 @@ void FileDefImpl::insertMember(MemberDef *md)
     allMemberList = new MemberList(MemberListType_allMembersList);
     m_memberLists.append(allMemberList);
   }
-  allMemberList->append(md); 
+  allMemberList->append(md);
   //::addFileMemberNameToIndex(md);
   switch (md->memberType())
   {
-    case MemberType_Variable:     
-    case MemberType_Property:     
+    case MemberType_Variable:
+    case MemberType_Property:
       addMemberToList(MemberListType_decVarMembers,md);
       addMemberToList(MemberListType_docVarMembers,md);
       break;
-    case MemberType_Function: 
+    case MemberType_Function:
       addMemberToList(MemberListType_decFuncMembers,md);
       addMemberToList(MemberListType_docFuncMembers,md);
       break;
-    case MemberType_Typedef:      
+    case MemberType_Typedef:
       addMemberToList(MemberListType_decTypedefMembers,md);
       addMemberToList(MemberListType_docTypedefMembers,md);
       break;
-    case MemberType_Sequence:      
+    case MemberType_Sequence:
       addMemberToList(MemberListType_decSequenceMembers,md);
       addMemberToList(MemberListType_docSequenceMembers,md);
       break;
-    case MemberType_Dictionary:      
+    case MemberType_Dictionary:
       addMemberToList(MemberListType_decDictionaryMembers,md);
       addMemberToList(MemberListType_docDictionaryMembers,md);
       break;
-    case MemberType_Enumeration:  
+    case MemberType_Enumeration:
       addMemberToList(MemberListType_decEnumMembers,md);
       addMemberToList(MemberListType_docEnumMembers,md);
       break;
     case MemberType_EnumValue:    // enum values are shown inside their enums
       break;
-    case MemberType_Define:       
+    case MemberType_Define:
       addMemberToList(MemberListType_decDefineMembers,md);
       addMemberToList(MemberListType_docDefineMembers,md);
       break;
@@ -1446,7 +1423,7 @@ void FileDefImpl::insertClass(ClassDef *cd)
 void FileDefImpl::insertNamespace(NamespaceDef *nd)
 {
   if (nd->isHidden()) return;
-  if (!nd->name().isEmpty() && 
+  if (!nd->name().isEmpty() &&
       (m_namespaceSDict==0 || m_namespaceSDict->find(nd->name())==0))
   {
     if (m_namespaceSDict==0)
@@ -1464,13 +1441,13 @@ void FileDefImpl::insertNamespace(NamespaceDef *nd)
   }
 }
 
-QCString FileDefImpl::name() const 
-{ 
-  if (Config_getBool(FULL_PATH_NAMES)) 
-    return m_fileName; 
-  else 
-    return DefinitionImpl::name(); 
-} 
+const QCString &FileDefImpl::name() const
+{
+  if (Config_getBool(FULL_PATH_NAMES))
+    return m_fileName;
+  else
+    return DefinitionImpl::name();
+}
 
 void FileDefImpl::addSourceRef(int line,Definition *d,MemberDef *md)
 {
@@ -1522,26 +1499,18 @@ void FileDefImpl::addUsingDirective(const NamespaceDef *nd)
   //printf("%p: FileDefImpl::addUsingDirective: %s:%d\n",this,name().data(),usingDirList->count());
 }
 
-NamespaceSDict *FileDefImpl::getUsedNamespaces() const 
-{ 
-  //printf("%p: FileDefImpl::getUsedNamespace: %s:%d\n",this,name().data(),usingDirList?usingDirList->count():0);
-  return m_usingDirList; 
-}
-
-void FileDefImpl::addUsingDeclaration(Definition *d)
+NamespaceSDict *FileDefImpl::getUsedNamespaces() const
 {
-  if (m_usingDeclList==0)
-  {
-    m_usingDeclList = new SDict<Definition>(17);
-  }
-  if (m_usingDeclList->find(d->qualifiedName())==0)
-  {
-    m_usingDeclList->append(d->qualifiedName(),d);
-  }
+  //printf("%p: FileDefImpl::getUsedNamespace: %s:%d\n",this,name().data(),usingDirList?usingDirList->count():0);
+  return m_usingDirList;
 }
 
-void FileDefImpl::addIncludeDependency(FileDef *fd,const char *incName,bool local,
-                                   bool imported,bool indirect)
+void FileDefImpl::addUsingDeclaration(const ClassDef *cd)
+{
+  m_usingDeclList.add(cd->qualifiedName(),cd);
+}
+
+void FileDefImpl::addIncludeDependency(FileDef *fd,const char *incName,bool local,bool imported)
 {
   //printf("FileDefImpl::addIncludeDependency(%p,%s,%d)\n",fd,incName,local);
   QCString iName = fd ? fd->absFilePath().data() : incName;
@@ -1558,7 +1527,6 @@ void FileDefImpl::addIncludeDependency(FileDef *fd,const char *incName,bool loca
     ii->includeName = incName;
     ii->local       = local;
     ii->imported    = imported;
-    ii->indirect    = indirect;
     m_includeList->append(ii);
     m_includeDict->insert(iName,ii);
   }
@@ -1611,23 +1579,11 @@ void FileDefImpl::addIncludedUsingDirectives()
             }
           }
           // add using declarations
-          SDict<Definition> *udl = ii->fileDef->getUsedClasses();
-          if (udl)
+          auto  udl = ii->fileDef->getUsedClasses();
+          for (auto it = udl.rbegin(); it!=udl.rend(); ++it)
           {
-            SDict<Definition>::Iterator udi(*udl);
-            Definition *d;
-            for (udi.toLast();(d=udi.current());--udi)
-            {
-              //printf("Adding using declaration %s\n",d->name().data());
-              if (m_usingDeclList==0)
-              {
-                m_usingDeclList = new SDict<Definition>(17);
-              }
-              if (m_usingDeclList->find(d->qualifiedName())==0)
-              {
-                m_usingDeclList->prepend(d->qualifiedName(),d);
-              }
-            }
+            const auto *cd = *it;
+            m_usingDeclList.prepend(cd->qualifiedName(),cd);
           }
         }
       }
@@ -1655,7 +1611,6 @@ void FileDefImpl::addIncludedByDependency(FileDef *fd,const char *incName,
     ii->includeName = incName;
     ii->local       = local;
     ii->imported    = imported;
-    ii->indirect    = FALSE;
     m_includedByList->append(ii);
     m_includedByDict->insert(iName,ii);
   }
@@ -1667,13 +1622,13 @@ bool FileDefImpl::isIncluded(const QCString &name) const
   return m_includeDict!=0 && m_includeDict->find(name)!=0;
 }
 
-bool FileDefImpl::generateSourceFile() const 
-{ 
+bool FileDefImpl::generateSourceFile() const
+{
   static bool sourceBrowser = Config_getBool(SOURCE_BROWSER);
   static bool verbatimHeaders = Config_getBool(VERBATIM_HEADERS);
-  return !isReference() && 
-         (sourceBrowser || 
-           (verbatimHeaders && guessSection(name())==Entry::HEADER_SEC) 
+  return !isReference() &&
+         (sourceBrowser ||
+           (verbatimHeaders && guessSection(name())==Entry::HEADER_SEC)
          ) &&
          !isDocumentationFile();
 }
@@ -1682,7 +1637,7 @@ bool FileDefImpl::generateSourceFile() const
 void FileDefImpl::addListReferences()
 {
   {
-    const std::vector<ListItemInfo> &xrefItems = xrefListItems();
+    const RefItemVector &xrefItems = xrefListItems();
     addRefItem(xrefItems,
                getOutputFileBase(),
                theTranslator->trFile(TRUE,TRUE),
@@ -1754,7 +1709,7 @@ static Directory *findDirNode(Directory *root,const QCString &name)
         {
           // recurse into the directory
           return findDirNode(dir,name.mid(dirName.length()+1));
-        } 
+        }
         else // partial match => we need to split the path into three parts
         {
           QCString baseName     =dirName.left(sp);
@@ -1784,7 +1739,7 @@ static Directory *findDirNode(Directory *root,const QCString &name)
           // add new branch to the root
           if (!root->children().isEmpty())
           {
-            root->children().getLast()->setLast(FALSE); 
+            root->children().getLast()->setLast(FALSE);
           }
           root->addChild(base);
           return newBranch;
@@ -1797,14 +1752,14 @@ static Directory *findDirNode(Directory *root,const QCString &name)
   {
     return root; // put the file under the root node.
   }
-  else // need to create a subdir 
+  else // need to create a subdir
   {
     QCString baseName = name.left(si);
     //printf("new subdir %s\n",baseName.data());
     Directory *newBranch = new Directory(root,baseName);
     if (!root->children().isEmpty())
     {
-      root->children().getLast()->setLast(FALSE); 
+      root->children().getLast()->setLast(FALSE);
     }
     root->addChild(newBranch);
     return newBranch;
@@ -1818,7 +1773,7 @@ static void mergeFileDef(Directory *root,FileDef *fd)
   Directory *dirNode = findDirNode(root,filePath);
   if (!dirNode->children().isEmpty())
   {
-    dirNode->children().getLast()->setLast(FALSE); 
+    dirNode->children().getLast()->setLast(FALSE);
   }
   DirEntry *e=new DirEntry(dirNode,fd);
   dirNode->addChild(e);
@@ -1912,7 +1867,7 @@ static void addDirsAsGroups(Directory *root,GroupDef *parent,int level)
                       root->path(), // name
                       root->name()  // title
                      );
-    if (parent) 
+    if (parent)
     {
       parent->addGroup(gd);
       gd->makePartOfGroup(parent);
@@ -1937,15 +1892,11 @@ void generateFileTree()
 {
   Directory *root=new Directory(0,"root");
   root->setLast(TRUE);
-  FileNameListIterator fnli(*Doxygen::inputNameList); 
-  FileName *fn;
-  for (fnli.toFirst();(fn=fnli.current());++fnli)
+  for (const auto &fn : *Doxygen::inputNameLinkedMap)
   {
-    FileNameIterator fni(*fn);
-    FileDef *fd;
-    for (;(fd=fni.current());++fni)
+    for (const auto &fd : *fn)
     {
-      mergeFileDef(root,fd);
+      mergeFileDef(root,fd.get());
     }
   }
   //t << "<div class=\"directory\">\n";
@@ -1983,15 +1934,9 @@ void FileDefImpl::combineUsingRelations()
         }
       }
       // add used classes of namespace nd to this namespace
-      if (nd->getUsedClasses())
+      for (const auto &ucd : nd->getUsedClasses())
       {
-        SDict<Definition>::Iterator cli(*nd->getUsedClasses());
-        Definition *ucd;
-        for (cli.toFirst();(ucd=cli.current());++cli)
-        {
-          //printf("Adding class %s to the using list of %s\n",cd->qualifiedName().data(),qualifiedName().data());
-          addUsingDeclaration(ucd);
-        }
+        addUsingDeclaration(ucd);
       }
     }
   }
@@ -2058,8 +2003,8 @@ QCString FileDefImpl::getOutputFileBase() const
 }
 
 /*! Returns the name of the verbatim copy of this file (if any). */
-QCString FileDefImpl::includeName() const 
-{ 
+QCString FileDefImpl::includeName() const
+{
   return getSourceFileBase();
 }
 
@@ -2090,17 +2035,11 @@ void FileDefImpl::addMemberToList(MemberListType lt,MemberDef *md)
        ((ml->listType()&MemberListType_declarationLists) && sortBriefDocs) ||
        ((ml->listType()&MemberListType_documentationLists) && sortMemberDocs));
   ml->append(md);
-#if 0
-  if (ml->needsSorting())
-    ml->inSort(md);
-  else
-    ml->append(md);
-#endif
   if (lt&MemberListType_documentationLists)
   {
     ml->setInFile(TRUE);
   }
-  if (ml->listType()&MemberListType_declarationLists) md->setSectionList(ml);
+  if (ml->listType()&MemberListType_declarationLists) md->setSectionList(this,ml);
 }
 
 void FileDefImpl::sortMemberLists()
@@ -2143,7 +2082,7 @@ void FileDefImpl::writeMemberDeclarations(OutputList &ol,MemberListType lt,const
 {
   static bool optVhdl = Config_getBool(OPTIMIZE_OUTPUT_VHDL);
   MemberList * ml = getMemberList(lt);
-  if (ml) 
+  if (ml)
   {
     if (optVhdl) // use specific declarations function
     {
@@ -2170,7 +2109,7 @@ bool FileDefImpl::isLinkableInProject() const
 }
 
 static void getAllIncludeFilesRecursively(
-    QDict<void> *filesVisited,const FileDef *fd,QStrList &incFiles)
+    StringUnorderedSet &filesVisited,const FileDef *fd,StringVector &incFiles)
 {
   if (fd->includeFileList())
   {
@@ -2179,21 +2118,21 @@ static void getAllIncludeFilesRecursively(
     for (iii.toFirst();(ii=iii.current());++iii)
     {
       if (ii->fileDef && !ii->fileDef->isReference() &&
-          !filesVisited->find(ii->fileDef->absFilePath()))
+          filesVisited.find(ii->fileDef->absFilePath().str())==filesVisited.end())
       {
         //printf("FileDefImpl::addIncludeDependency(%s)\n",ii->fileDef->absFilePath().data());
-        incFiles.append(ii->fileDef->absFilePath());
-        filesVisited->insert(ii->fileDef->absFilePath(),(void*)0x8);
+        incFiles.push_back(ii->fileDef->absFilePath().str());
+        filesVisited.insert(ii->fileDef->absFilePath().str());
         getAllIncludeFilesRecursively(filesVisited,ii->fileDef,incFiles);
       }
     }
   }
 }
 
-void FileDefImpl::getAllIncludeFilesRecursively(QStrList &incFiles) const
+void FileDefImpl::getAllIncludeFilesRecursively(StringVector &incFiles) const
 {
-  QDict<void> includes(257);
-  ::getAllIncludeFilesRecursively(&includes,this,incFiles);
+  StringUnorderedSet includes;
+  ::getAllIncludeFilesRecursively(includes,this,incFiles);
 }
 
 QCString FileDefImpl::title() const

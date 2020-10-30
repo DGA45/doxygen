@@ -32,13 +32,10 @@ class VHDLOutlineParser : public OutlineParserInterface
   public:
     VHDLOutlineParser();
     virtual ~VHDLOutlineParser();
-    void startTranslationUnit(const char *) {}
-    void finishTranslationUnit() {}
     void parseInput(const char * fileName,
                     const char *fileBuf,
                     const std::shared_ptr<Entry> &root,
-                    bool sameTranslationUnit,
-                    QStrList &filesInSameTranslationUnit);
+                    ClangTUParser *clangParser);
 
     bool needsPreprocessing(const QCString &) const { return TRUE; }
     void parsePrototype(const char *text);
@@ -71,11 +68,13 @@ class VHDLOutlineParser : public OutlineParserInterface
     void setMultCommentLine();
     bool checkMultiComment(QCString& qcs,int line);
     void insertEntryAtLine(std::shared_ptr<Entry> ce,int line);
-
+    QString getNameID();
+    int checkInlineCode(QCString & doc);
   private:
     struct Private;
     std::unique_ptr<Private> p;
 };
+
 
 const EntryList &getVhdlInstList();
 

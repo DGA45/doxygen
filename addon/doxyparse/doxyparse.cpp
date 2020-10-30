@@ -44,11 +44,12 @@
 #include <qcstring.h>
 #include <qregexp.h>
 #include "namespacedef.h"
+#include "portable.h"
 
 class Doxyparse : public CodeOutputInterface
 {
   public:
-    Doxyparse(FileDef *fd) : m_fd(fd) {}
+    Doxyparse(const FileDef *fd) : m_fd(fd) {}
    ~Doxyparse() {}
 
     // these are just null functions, they can be used to produce a syntax highlighted
@@ -69,6 +70,8 @@ class Doxyparse : public CodeOutputInterface
     void startCodeLine(bool) {}
     void setCurrentDoc(const Definition *,const char *,bool) {}
     void addWord(const char *,bool) {}
+    void startCodeFragment(const char *) {}
+    void endCodeFragment(const char *) {}
 
     void linkableSymbol(int l, const char *sym, Definition *symDef, Definition *context)
     {
@@ -81,7 +84,7 @@ class Doxyparse : public CodeOutputInterface
     }
 
   private:
-    FileDef *m_fd;
+    const FileDef *m_fd;
 };
 
 static bool is_c_code = true;
@@ -89,25 +92,25 @@ static bool is_c_code = true;
 static void findXRefSymbols(FileDef *fd)
 {
   // get the interface to a parser that matches the file extension
-  CodeParserInterface &intf=Doxygen::parserManager->getCodeParser(fd->getDefFileExtension());
+  auto intf=Doxygen::parserManager->getCodeParser(fd->getDefFileExtension());
 
   // get the programming language from the file name
   SrcLangExt lang = getLanguageFromFileName(fd->name());
 
   // reset the parsers state
-  intf.resetCodeParserState();
+  intf->resetCodeParserState();
 
   // create a new backend object
   Doxyparse *parse = new Doxyparse(fd);
 
   // parse the source code
-  intf.parseCode(*parse, 0, fileToString(fd->absFilePath()), lang, FALSE, 0, fd);
+  intf->parseCode(*parse, 0, fileToString(fd->absFilePath()), lang, FALSE, 0, fd);
 
   // dismiss the object.
   delete parse;
 }
 
-static bool ignoreStaticExternalCall(MemberDef *context, MemberDef *md) {
+static bool ignoreStaticExternalCall(const MemberDef *context, const MemberDef *md) {
   if (md->isStatic()) {
     if(md->getFileDef() && context->getFileDef()) {
       if(md->getFileDef()->getOutputFileBase() == context->getFileDef()->getOutputFileBase())
@@ -154,11 +157,14 @@ static void printDefinition(std::string type, std::string signature, int line) {
 static void printProtection(std::string protection) {
   printf("          protection: %s\n", protection.c_str());
 }
+static void printPrototypeYes() {
+  printf("          prototype: yes\n");
+}
 static void printNumberOfLines(int lines) {
   printf("          lines_of_code: %d\n", lines);
 }
-static void printNumberOfArguments(int arguments) {
-  printf("          parameters: %d\n", arguments);
+static void printNumberOfArguments(size_t arguments) {
+  printf("          parameters: %zu\n", arguments);
 }
 static void printUses() {
   printf("          uses:\n");
@@ -168,11 +174,11 @@ static void printReferenceTo(std::string type, std::string signature, std::strin
   printf("                type: %s\n", type.c_str());
   printf("                defined_in: \"%s\"\n", unescapeCharsInString(defined_in.c_str()).data());
 }
-static void printNumberOfConditionalPaths(MemberDef* md) {
+static void printNumberOfConditionalPaths(const MemberDef* md) {
   printf("          conditional_paths: %d\n", md->numberOfFlowKeyWords());
 }
 
-static int isPartOfCStruct(MemberDef * md) {
+static int isPartOfCStruct(const MemberDef * md) {
   return is_c_code && md->getClassDef() != NULL;
 }
 
@@ -192,7 +198,7 @@ std::string argumentData(const Argument &argument) {
   return data;
 }
 
-std::string functionSignature(MemberDef* md) {
+std::string functionSignature(const MemberDef* md) {
   std::string signature = sanitizeString(md->name().data());
   if(md->isFunction()){
     const ArgumentList &argList = md->argumentList();
@@ -209,7 +215,7 @@ std::string functionSignature(MemberDef* md) {
   return signature;
 }
 
-static void referenceTo(MemberDef* md) {
+static void referenceTo(const MemberDef* md) {
   std::string type = md->memberTypeName().data();
   std::string defined_in = "";
   std::string signature = "";
@@ -232,27 +238,40 @@ static void referenceTo(MemberDef* md) {
   printReferenceTo(type, signature, defined_in);
 }
 
-void cModule(ClassDef* cd) {
-  MemberList* ml = cd->getMemberList(MemberListType_variableMembers);
+void protectionInformation(Protection protection) {
+  if (protection == Public) {
+    printProtection("public");
+  }
+  else if (protection == Protected) {
+    printProtection("protected");
+  }
+  else if (protection == Private) {
+    printProtection("private");
+  }
+  else if (protection == Package) {
+    printProtection("package");
+  }
+}
+
+void cModule(const ClassDef* cd) {
+  const MemberList* ml = cd->getMemberList(MemberListType_variableMembers);
   if (ml) {
-    FileDef *fd = cd->getFileDef();
-    MemberList *fd_ml = fd->getMemberList(MemberListType_allMembersList);
+    const FileDef *fd = cd->getFileDef();
+    const MemberList *fd_ml = fd->getMemberList(MemberListType_allMembersList);
     if (!fd_ml || fd_ml->count() == 0) {
       printModule(fd->getOutputFileBase().data());
       printDefines();
     }
     MemberListIterator mli(*ml);
-    MemberDef* md;
+    const MemberDef* md;
     for (mli.toFirst(); (md=mli.current()); ++mli) {
       printDefinition("variable", cd->name().data() + std::string("::") + md->name().data(), md->getDefLine());
-      if (md->protection() == Public) {
-        printProtection("public");
-      }
+      protectionInformation(md->protection());
     }
   }
 }
 
-static bool checkOverrideArg(const ArgumentList &argList, MemberDef *md) {
+static bool checkOverrideArg(const ArgumentList &argList, const MemberDef *md) {
   if(!md->isFunction() || argList.empty()){
     return false;
   }
@@ -266,7 +285,7 @@ static bool checkOverrideArg(const ArgumentList &argList, MemberDef *md) {
   return false;
 }
 
-void functionInformation(MemberDef* md) {
+void functionInformation(const MemberDef* md) {
   std::string temp = "";
   int size = md->getEndBodyLine() - md->getStartBodyLine() + 1;
   printNumberOfLines(size);
@@ -274,7 +293,7 @@ void functionInformation(MemberDef* md) {
   if (!argList.empty())
   {
     temp = argumentData(argList.front());
-// TODO: This is a workaround; better not include "void" in argList, in the first place. 
+// TODO: This is a workaround; better not include "void" in argList, in the first place.
     if (temp!="void")
     {
       printNumberOfArguments(argList.size());
@@ -282,12 +301,10 @@ void functionInformation(MemberDef* md) {
   }
 
   printNumberOfConditionalPaths(md);
-  MemberSDict *defDict = md->getReferencesMembers();
-  if (defDict) {
-    MemberSDict::Iterator msdi(*defDict);
-    MemberDef *rmd;
+  auto refList = md->getReferencesMembers();
+  if (!refList.empty()) {
     printUses();
-    for (msdi.toFirst(); (rmd=msdi.current()); ++msdi) {
+    for (const auto &rmd : refList) {
       if (rmd->definitionType() == Definition::TypeMember && !ignoreStaticExternalCall(md, rmd) && !checkOverrideArg(argList, rmd)) {
         referenceTo(rmd);
       }
@@ -295,32 +312,39 @@ void functionInformation(MemberDef* md) {
   }
 }
 
-static void lookupSymbol(Definition *d) {
+void prototypeInformation(const MemberDef* md) {
+  printPrototypeYes();
+  const ArgumentList &argList = md->argumentList();
+  printNumberOfArguments(argList.size());
+}
+
+static void lookupSymbol(const Definition *d) {
   if (d->definitionType() == Definition::TypeMember) {
-    MemberDef *md = dynamic_cast<MemberDef*>(d);
+    const MemberDef *md = dynamic_cast<const MemberDef*>(d);
     std::string type = md->memberTypeName().data();
     std::string signature = functionSignature(md);
     printDefinition(type, signature, md->getDefLine());
-    if (md->protection() == Public) {
-      printProtection("public");
+    protectionInformation(md->protection());
+    if (md->isFunction() && md->isPrototype()) {
+      prototypeInformation(md);
     }
-    if (md->isFunction()) {
+    else if (md->isFunction()) {
       functionInformation(md);
     }
   }
 }
 
-void listMembers(MemberList *ml) {
+void listMembers(const MemberList *ml) {
   if (ml) {
     MemberListIterator mli(*ml);
-    MemberDef *md;
+    const MemberDef *md;
     for (mli.toFirst(); (md=mli.current()); ++mli) {
       lookupSymbol((Definition*) md);
     }
   }
 }
 
-void listAllMembers(ClassDef* cd) {
+void listAllMembers(const ClassDef* cd) {
   // methods
   listMembers(cd->getMemberList(MemberListType_functionMembers));
   // constructors
@@ -329,18 +353,15 @@ void listAllMembers(ClassDef* cd) {
   listMembers(cd->getMemberList(MemberListType_variableMembers));
 }
 
-static void classInformation(ClassDef* cd) {
+static void classInformation(const ClassDef* cd) {
   if (is_c_code) {
     cModule(cd);
   } else {
     printModule(cd->name().data());
-    BaseClassList* baseClasses = cd->baseClasses();
-    if (baseClasses) {
+    if (!cd->baseClasses().empty()) {
       printInherits();
-      BaseClassListIterator bci(*baseClasses);
-      BaseClassDef* bcd;
-      for (bci.toFirst(); (bcd = bci.current()); ++bci) {
-        printInheritance(bcd->classDef->name().data());
+      for (const auto &bcd : cd->baseClasses()) {
+        printInheritance(bcd.classDef->name().data());
       }
     }
     if(cd->isAbstract()) {
@@ -361,9 +382,8 @@ static bool checkLanguage(std::string& filename, std::string extension) {
 
 /* Detects the programming language of the project. Actually, we only care
  * about whether it is a C project or not. */
-static void detectProgrammingLanguage(FileNameListIterator& fnli) {
-  FileName* fn;
-  for (fnli.toFirst(); (fn=fnli.current()); ++fnli) {
+static void detectProgrammingLanguage(FileNameLinkedMap &fnli) {
+  for (const auto &fn : fnli) {
     std::string filename = fn->fileName();
     if (
         checkLanguage(filename, ".cc") ||
@@ -380,17 +400,11 @@ static void detectProgrammingLanguage(FileNameListIterator& fnli) {
 }
 
 static void listSymbols() {
+  detectProgrammingLanguage(*Doxygen::inputNameLinkedMap);
+
   // iterate over the input files
-  FileNameListIterator fnli(*Doxygen::inputNameList);
-  FileName *fn;
-
-  detectProgrammingLanguage(fnli);
-
-  // for each file
-  for (fnli.toFirst(); (fn=fnli.current()); ++fnli) {
-    FileNameIterator fni(*fn);
-    FileDef *fd;
-    for (; (fd=fni.current()); ++fni) {
+  for (const auto &fn : *Doxygen::inputNameLinkedMap) {
+    for (const auto &fd : *fn) {
       printFile(fd->absFilePath().data());
       MemberList *ml = fd->getMemberList(MemberListType_allMembersList);
       if (ml && ml->count() > 0) {
@@ -402,7 +416,7 @@ static void listSymbols() {
       ClassSDict *classes = fd->getClassSDict();
       if (classes) {
         ClassSDict::Iterator cli(*classes);
-        ClassDef *cd;
+        const ClassDef *cd;
         for (cli.toFirst(); (cd = cli.current()); ++cli) {
           if (!cd->isVisited()) {
             classInformation(cd);
@@ -421,7 +435,7 @@ int main(int argc,char **argv) {
     exit(1);
   }
   if (qstrcmp(&argv[1][2], "version") == 0) {
-    QCString versionString = getVersion();
+    QCString versionString = getDoxygenVersion();
     printf("%s\n", versionString.data());
     exit(0);
   }
@@ -437,50 +451,43 @@ int main(int argc,char **argv) {
 
   // we need a place to put intermediate files
   std::ostringstream tmpdir;
-#if !defined(_WIN32) || defined(__CYGWIN__)
-  unsigned int pid = (uint)getpid();
-#else
-  unsigned int pid = (uint)GetCurrentProcessId();
-#endif
-  tmpdir << "/tmp/doxyparse-" << pid;
-  Config_getString(OUTPUT_DIRECTORY)= tmpdir.str().c_str();
+  unsigned int pid = Portable::pid();
+  if (Portable::getenv("TMP"))
+    tmpdir << Portable::getenv("TMP") << "/doxyparse-" << pid;
+  else if (Portable::getenv("TEMP"))
+    tmpdir << Portable::getenv("TEMP") << "/doxyparse-" << pid;
+  else
+    tmpdir << "doxyparse-" << pid;
+
+  Config_updateString(OUTPUT_DIRECTORY,tmpdir.str().c_str());
   // enable HTML (fake) output to omit warning about missing output format
-  Config_getBool(GENERATE_HTML)=TRUE;
+  Config_updateBool(GENERATE_HTML,TRUE);
   // disable latex output
-  Config_getBool(GENERATE_LATEX)=FALSE;
+  Config_updateBool(GENERATE_LATEX,FALSE);
   // be quiet
-  Config_getBool(QUIET)=TRUE;
+  Config_updateBool(QUIET,TRUE);
   // turn off warnings
-  Config_getBool(WARNINGS)=FALSE;
-  Config_getBool(WARN_IF_UNDOCUMENTED)=FALSE;
-  Config_getBool(WARN_IF_DOC_ERROR)=FALSE;
+  Config_updateBool(WARNINGS,FALSE);
+  Config_updateBool(WARN_IF_UNDOCUMENTED,FALSE);
+  Config_updateBool(WARN_IF_DOC_ERROR,FALSE);
   // Extract as much as possible
-  Config_getBool(EXTRACT_ALL)=TRUE;
-  Config_getBool(EXTRACT_STATIC)=TRUE;
-  Config_getBool(EXTRACT_PRIVATE)=TRUE;
-  Config_getBool(EXTRACT_LOCAL_METHODS)=TRUE;
-  Config_getBool(EXTRACT_PACKAGE)=TRUE;
+  Config_updateBool(EXTRACT_ALL,TRUE);
+  Config_updateBool(EXTRACT_STATIC,TRUE);
+  Config_updateBool(EXTRACT_PRIVATE,TRUE);
+  Config_updateBool(EXTRACT_LOCAL_METHODS,TRUE);
+  Config_updateBool(EXTRACT_PACKAGE,TRUE);
   // Extract source browse information, needed
   // to make doxygen gather the cross reference info
-  Config_getBool(SOURCE_BROWSER)=TRUE;
+  Config_updateBool(SOURCE_BROWSER,TRUE);
   // find functions call between modules
-  Config_getBool(CALL_GRAPH)=TRUE;
+  Config_updateBool(CALL_GRAPH,TRUE);
   // loop recursive over input files
-  Config_getBool(RECURSIVE)=TRUE;
+  Config_updateBool(RECURSIVE,TRUE);
   // add file extensions
-  Config_getList(FILE_PATTERNS).append("*.cc");
-  Config_getList(FILE_PATTERNS).append("*.cxx");
-  Config_getList(FILE_PATTERNS).append("*.cpp");
-  Config_getList(FILE_PATTERNS).append("*.java");
-  Config_getList(FILE_PATTERNS).append("*.py");
-  Config_getList(FILE_PATTERNS).append("*.pyw");
-  Config_getList(FILE_PATTERNS).append("*.cs");
-  Config_getList(FILE_PATTERNS).append("*.c");
-  Config_getList(FILE_PATTERNS).append("*.h");
-  Config_getList(FILE_PATTERNS).append("*.hh");
-  Config_getList(FILE_PATTERNS).append("*.hpp");
+  Config_updateList(FILE_PATTERNS, { "*.cc", "*.cxx", "*.cpp", "*.java",
+                                     "*.py", "*.pyw", "*.cs", "*.c", "*.h", "*.hh", "*.hpp"});
   // set the input
-  Config_getList(INPUT).clear();
+  StringVector inputList;
   for (int i = 1; i < argc; i++) {
     if (strcmp(argv[i], "-") == 0) {
       char filename[1024];
@@ -489,13 +496,14 @@ int main(int argc,char **argv) {
         if (feof(stdin)) {
           break;
         }
-        Config_getList(INPUT).append(filename);
+        inputList.push_back(filename);
       }
     } else {
-      Config_getList(INPUT).append(argv[i]);
+      inputList.push_back(argv[i]);
     }
   }
-  if (Config_getList(INPUT).isEmpty()) {
+  Config_updateList(INPUT,inputList);
+  if (inputList.empty()) {
     exit(0);
   }
 
@@ -503,16 +511,10 @@ int main(int argc,char **argv) {
   parseInput();
 
   // iterate over the input files
-  FileNameListIterator fnli(*Doxygen::inputNameList);
-  FileName *fn;
-  // for each file with a certain name
-  for (fnli.toFirst();(fn=fnli.current());++fnli) {
-    FileNameIterator fni(*fn);
-    FileDef *fd;
-    // for each file definition
-    for (;(fd=fni.current());++fni) {
+  for (const auto &fn : *Doxygen::inputNameLinkedMap) {
+    for (const auto &fd : *fn) {
       // get the references (linked and unlinked) found in this file
-      findXRefSymbols(fd);
+      findXRefSymbols(fd.get());
     }
   }
 

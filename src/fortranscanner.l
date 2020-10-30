@@ -42,6 +42,9 @@
 %option prefix="fortranscannerYY"
 %option reentrant
 %option extra-type="struct fortranscannerYY_state *"
+%top{
+#include <stdint.h>
+}
 
 %{
 
@@ -141,7 +144,7 @@ struct CommentInPrepass
 {
   int column;
   QCString str;
-  CommentInPrepass(int column, QCString str) : column(column), str(str) {}
+  CommentInPrepass(int col, QCString s) : column(col), str(s) {}
 };
 
 /* -----------------------------------------------------------------
@@ -210,7 +213,7 @@ static QCString extractFromParens(const QCString name);
 static QCString extractBind(const QCString name);
 
 
-static int yyread(yyscan_t yyscanner,char *buf,int max_size);
+static yy_size_t yyread(yyscan_t yyscanner,char *buf,yy_size_t max_size);
 static void startCommentBlock(yyscan_t yyscanner,bool);
 static void handleCommentBlock(yyscan_t yyscanner,const QCString &doc,bool brief);
 static void subrHandleCommentBlock(yyscan_t yyscanner,const QCString &doc,bool brief);
@@ -464,6 +467,7 @@ SCOPENAME ({ID}{BS}"::"{BS})*
 <Use>{ID}                               { 
                                           DBG_CTX((stderr,"using dir %s\n",yytext));
                                           yyextra->current->name=yytext;
+                                          yyextra->current->name=yyextra->current->name.lower();
                                           yyextra->current->fileName = yyextra->fileName; 
                                           yyextra->current->section=Entry::USINGDIR_SEC;
                                           yyextra->current_root->moveToSubEntryAndRefresh(yyextra->current);
@@ -472,12 +476,14 @@ SCOPENAME ({ID}{BS}"::"{BS})*
                                         }
 <Use>{ID}/,                             { 
                                           yyextra->useModuleName=yytext;
+                                          yyextra->useModuleName=yyextra->useModuleName.lower();
                                         }
 <Use>,{BS}"ONLY"                        { BEGIN(UseOnly); 
                                         }           
 <UseOnly>{BS},{BS}                      {}
 <UseOnly>{ID}                           {
                                           yyextra->current->name= yyextra->useModuleName+"::"+yytext;
+                                          yyextra->current->name=yyextra->current->name.lower();
                                           yyextra->current->fileName = yyextra->fileName; 
                                           yyextra->current->section=Entry::USINGDECL_SEC;
                                           yyextra->current_root->moveToSubEntryAndRefresh(yyextra->current);
@@ -924,7 +930,7 @@ private                                 {
                                                   if (strt != 0) lft = yyextra->current_root->type.left(strt).stripWhiteSpace();
                                                   if ((yyextra->current_root->type.length() - strt - strlen("function"))!= 0)
                                                   {
-                                                    rght = yyextra->current_root->type.right(yyextra->current_root->type.length() - strt - strlen("function")).stripWhiteSpace();
+                                                    rght = yyextra->current_root->type.right(yyextra->current_root->type.length() - strt - (int)strlen("function")).stripWhiteSpace();
                                                   }
                                                   yyextra->current_root->type = lft;
                                                   if (rght.length() > 0)
@@ -1492,50 +1498,6 @@ void truncatePrepass(yyscan_t yyscanner,int index)
   yyextra->inputStringPrepass.truncate(index);
 }
 
-// simplified way to know if this is fixed form
-// duplicate in fortrancode.l
-bool recognizeFixedForm(const char* contents, FortranFormat format)
-{
-  int column=0;
-  bool skipLine=FALSE;
-
-  if (format == FortranFormat_Fixed) return TRUE;
-  if (format == FortranFormat_Free)  return FALSE;
-
-  for(int i=0;;i++) {
-    column++;
-
-    switch(contents[i]) {
-      case '\n':
-        column=0;
-        skipLine=FALSE;
-        break;
-      case ' ':
-        break;
-      case '\000':
-        return FALSE;
-      case '#':
-        skipLine=TRUE;
-        break;
-      case 'C':
-      case 'c':
-      case '*':
-        if (column==1) return TRUE;
-        if (skipLine) break;
-        return FALSE;
-      case '!':
-        if (column>1 && column<7) return FALSE;
-        skipLine=TRUE;
-        break;
-      default:
-        if (skipLine) break;
-        if (column==7) return TRUE;
-        return FALSE;
-    }
-  }
-  return FALSE;
-}
-
 /* This function assumes that contents has at least size=length+1 */
 static void insertCharacter(char *contents, int length, int pos, char c)
 {
@@ -1564,7 +1526,7 @@ const char* prepassFixedForm(const char* contents, int *hasContLine)
   bool fullCommentLine=TRUE;
   bool artificialComment=FALSE;
   bool spaces=TRUE;
-  int newContentsSize = strlen(contents)+3; // \000, \n (when necessary) and one spare character (to avoid reallocation)
+  int newContentsSize = (int)strlen(contents)+3; // \000, \n (when necessary) and one spare character (to avoid reallocation)
   char* newContents = (char*)malloc(newContentsSize);
   int curLine = 1;
 
@@ -1640,7 +1602,7 @@ const char* prepassFixedForm(const char* contents, int *hasContLine)
            return NULL;
         }
         newContents[j]='\000';
-        newContentsSize = strlen(newContents);
+        newContentsSize = (int)strlen(newContents);
         if (newContents[newContentsSize - 1] != '\n')
         {
           // to be on the safe side
@@ -1783,7 +1745,7 @@ const char* prepassFixedForm(const char* contents, int *hasContLine)
     free(newContents);
     return NULL;
   }
-  newContentsSize = strlen(newContents);
+  newContentsSize = (int)strlen(newContents);
   if (newContents[newContentsSize - 1] != '\n')
   {
     // to be on the safe side
@@ -2313,10 +2275,10 @@ static bool endScope(yyscan_t yyscanner,Entry *scope, bool isGlobalRoot)
   return TRUE;
 }
 
-static int yyread(yyscan_t yyscanner,char *buf,int max_size)
+static yy_size_t yyread(yyscan_t yyscanner,char *buf,yy_size_t max_size)
 {
   struct yyguts_t *yyg = (struct yyguts_t*)yyscanner;
-  int c=0;
+  yy_size_t c=0;
   while ( c < max_size && yyextra->inputString[yyextra->inputPosition] )
   {
     *buf = yyextra->inputString[yyextra->inputPosition++] ;
@@ -2512,7 +2474,8 @@ static void handleCommentBlock(yyscan_t yyscanner,const QCString &doc,bool brief
   int lineNr = brief ? yyextra->current->briefLine : yyextra->current->docLine;
   int position=0;
   bool needsEntry = FALSE;
-  QCString processedDoc = processMarkdownForCommentBlock(doc,yyextra->fileName,lineNr);
+  Markdown markdown(yyextra->fileName,lineNr);
+  QCString processedDoc = Config_getBool(MARKDOWN_SUPPORT) ? markdown.process(doc,lineNr) : doc;
   while (yyextra->commentScanner.parseCommentBlock(
         yyextra->thisParser,
         yyextra->docBlockInBody ? yyextra->subrCurrent.back().get() : yyextra->current.get(),
@@ -2524,8 +2487,9 @@ static void handleCommentBlock(yyscan_t yyscanner,const QCString &doc,bool brief
         yyextra->docBlockInBody,
         yyextra->defaultProtection,
         position,
-        needsEntry
-        )) 
+        needsEntry,
+        Config_getBool(MARKDOWN_SUPPORT)
+        ))
   {
     DBG_CTX((stderr,"parseCommentBlock position=%d [%s]  needsEntry=%d\n",position,doc.data()+position,needsEntry));
     if (needsEntry) addCurrentEntry(yyscanner,false);
@@ -2566,7 +2530,7 @@ static void subrHandleCommentBlock(yyscan_t yyscanner,const QCString &doc,bool b
         (directionParam[dir1] == directionParam[SymbolModifiers::IN]))
     {
       // strip direction
-      loc_doc = loc_doc.right(loc_doc.length()-strlen(directionParam[SymbolModifiers::IN]));
+      loc_doc = loc_doc.right(loc_doc.length()-(int)strlen(directionParam[SymbolModifiers::IN]));
       loc_doc.stripWhiteSpace();
       // in case of empty documentation or (now) just name, consider it as no documentation
       if (!loc_doc.isEmpty() && (loc_doc.lower() != yyextra->argName.lower()))
@@ -2578,8 +2542,8 @@ static void subrHandleCommentBlock(yyscan_t yyscanner,const QCString &doc,bool b
     else
     {
       // something different specified, give warning and leave error.
-      warn(yyextra->fileName,yyextra->lineNr, "Routine: " + yyextra->current->name + yyextra->current->args +
-           " inconsistency between intent attribute and documentation for parameter: " + yyextra->argName);
+      warn(yyextra->fileName,yyextra->lineNr, "%s", ("Routine: " + yyextra->current->name + yyextra->current->args +
+           " inconsistency between intent attribute and documentation for parameter: " + yyextra->argName).data());
       handleCommentBlock(yyscanner,QCString("\n\n@param ") + directionParam[dir1] + " " + 
                          yyextra->argName + " " + loc_doc,brief);
     }
@@ -2590,7 +2554,7 @@ static void subrHandleCommentBlock(yyscan_t yyscanner,const QCString &doc,bool b
     if ((directionParam[dir1] == directionParam[SymbolModifiers::NONE_D]) ||
         (directionParam[dir1] == directionParam[SymbolModifiers::OUT]))
     {
-      loc_doc = loc_doc.right(loc_doc.length()-strlen(directionParam[SymbolModifiers::OUT]));
+      loc_doc = loc_doc.right(loc_doc.length()-(int)strlen(directionParam[SymbolModifiers::OUT]));
       loc_doc.stripWhiteSpace();
       if (loc_doc.isEmpty() || (loc_doc.lower() == yyextra->argName.lower()))
       {
@@ -2602,8 +2566,8 @@ static void subrHandleCommentBlock(yyscan_t yyscanner,const QCString &doc,bool b
     }
     else
     {
-      warn(yyextra->fileName,yyextra->lineNr, "Routine: " + yyextra->current->name + yyextra->current->args +
-           " inconsistency between intent attribute and documentation for parameter: " + yyextra->argName);
+      warn(yyextra->fileName,yyextra->lineNr, "%s", ("Routine: " + yyextra->current->name + yyextra->current->args +
+           " inconsistency between intent attribute and documentation for parameter: " + yyextra->argName).data());
       handleCommentBlock(yyscanner,QCString("\n\n@param ") + directionParam[dir1] + " " + 
                          yyextra->argName + " " + loc_doc,brief);
     }
@@ -2614,7 +2578,7 @@ static void subrHandleCommentBlock(yyscan_t yyscanner,const QCString &doc,bool b
     if ((directionParam[dir1] == directionParam[SymbolModifiers::NONE_D]) ||
         (directionParam[dir1] == directionParam[SymbolModifiers::INOUT]))
     {
-      loc_doc = loc_doc.right(loc_doc.length()-strlen(directionParam[SymbolModifiers::INOUT]));
+      loc_doc = loc_doc.right(loc_doc.length()-(int)strlen(directionParam[SymbolModifiers::INOUT]));
       loc_doc.stripWhiteSpace();
       if (!loc_doc.isEmpty() && (loc_doc.lower() != yyextra->argName.lower()))
       {
@@ -2624,8 +2588,8 @@ static void subrHandleCommentBlock(yyscan_t yyscanner,const QCString &doc,bool b
     }
     else
     {
-      warn(yyextra->fileName,yyextra->lineNr, "Routine: " + yyextra->current->name + yyextra->current->args +
-           " inconsistency between intent attribute and documentation for parameter: " + yyextra->argName);
+      warn(yyextra->fileName,yyextra->lineNr, "%s", ("Routine: " + yyextra->current->name + yyextra->current->args +
+           " inconsistency between intent attribute and documentation for parameter: " + yyextra->argName).data());
       handleCommentBlock(yyscanner,QCString("\n\n@param ") + directionParam[dir1] + " " + 
                          yyextra->argName + " " + loc_doc,brief);
     }
@@ -2679,6 +2643,9 @@ static void parseMain(yyscan_t yyscanner, const char *fileName,const char *fileB
   struct yyguts_t *yyg = (struct yyguts_t*)yyscanner;
   char *tmpBuf = NULL;
   initParser(yyscanner);
+
+
+  if (fileBuf==0 || fileBuf[0]=='\0') return;
 
   yyextra->defaultProtection = Public;
   yyextra->inputString = fileBuf;
@@ -2799,8 +2766,7 @@ FortranOutlineParser::~FortranOutlineParser()
 void FortranOutlineParser::parseInput(const char *fileName,
                                         const char *fileBuf,
                                         const std::shared_ptr<Entry> &root,
-                                        bool /*sameTranslationUnit*/,
-                                        QStrList & /*filesInSameTranslationUnit*/)
+                                        ClangTUParser * /*clangParser*/)
 {
   struct yyguts_t *yyg = (struct yyguts_t*)p->yyscanner;
   yyextra->thisParser = this;

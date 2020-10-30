@@ -20,21 +20,18 @@
 #include "template.h"
 #include <qlist.h>
 #include <stdio.h>
+#include "dirdef.h"
+#include "classdef.h"
 
 class Definition;
-class ClassDef;
-class ClassSDict;
-class BaseClassList;
 class PageDef;
 class GroupDef;
 class NamespaceDef;
-class BaseClassList;
 class NamespaceSDict;
 class FileDef;
 class FileList;
-class FileNameList;
+class FileNameLinkedMap;
 class DirSDict;
-class DirList;
 class DirDef;
 class PageSDict;
 class GroupSDict;
@@ -46,8 +43,8 @@ class MemberSDict;
 class MemberDef;
 struct Argument;
 class ArgumentList;
-class MemberNameInfoSDict;
-struct MemberInfo;
+class MemberNameInfoLinkedMap;
+class MemberInfo;
 class MemberGroup;
 class MemberGroupSDict;
 class MemberGroupList;
@@ -189,8 +186,8 @@ class UsedFilesContext : public RefCountedContext, public TemplateListIntf
     static UsedFilesContext *alloc(const ClassDef *cd) { return new UsedFilesContext(cd); }
 
     // TemplateListIntf
-    virtual int count() const;
-    virtual TemplateVariant at(int index) const;
+    virtual uint count() const;
+    virtual TemplateVariant at(uint index) const;
     virtual TemplateListIntf::ConstIterator *createIterator() const;
     virtual int addRef()  { return RefCountedContext::addRef(); }
     virtual int release() { return RefCountedContext::release(); }
@@ -234,8 +231,8 @@ class IncludeInfoListContext : public RefCountedContext, public TemplateListIntf
     { return new IncludeInfoListContext(list,lang); }
 
     // TemplateListIntf
-    virtual int count() const;
-    virtual TemplateVariant at(int index) const;
+    virtual uint count() const;
+    virtual TemplateVariant at(uint index) const;
     virtual TemplateListIntf::ConstIterator *createIterator() const;
     virtual int addRef()  { return RefCountedContext::addRef(); }
     virtual int release() { return RefCountedContext::release(); }
@@ -348,7 +345,7 @@ class PageContext : public RefCountedContext, public TemplateStructIntf
 class MemberContext : public RefCountedContext, public TemplateStructIntf
 {
   public:
-    static MemberContext *alloc(MemberDef *md) { return new MemberContext(md); }
+    static MemberContext *alloc(const MemberDef *md) { return new MemberContext(md); }
 
     // TemplateStructIntf methods
     virtual TemplateVariant get(const char *name) const;
@@ -356,7 +353,7 @@ class MemberContext : public RefCountedContext, public TemplateStructIntf
     virtual int release() { return RefCountedContext::release(); }
 
   private:
-    MemberContext(MemberDef *);
+    MemberContext(const MemberDef *);
    ~MemberContext();
     class Private;
     Private *p;
@@ -390,8 +387,8 @@ class ClassListContext : public RefCountedContext, public TemplateListIntf
     static ClassListContext *alloc() { return new ClassListContext; }
 
     // TemplateListIntf
-    virtual int  count() const;
-    virtual TemplateVariant at(int index) const;
+    virtual uint count() const;
+    virtual TemplateVariant at(uint index) const;
     virtual TemplateListIntf::ConstIterator *createIterator() const;
     virtual int addRef()  { return RefCountedContext::addRef(); }
     virtual int release() { return RefCountedContext::release(); }
@@ -455,7 +452,7 @@ class ClassInheritanceNodeContext : public RefCountedContext, public TemplateStr
     virtual int addRef()  { return RefCountedContext::addRef(); }
     virtual int release() { return RefCountedContext::release(); }
 
-    void addChildren(const BaseClassList *bcl,bool hideSuper);
+    void addChildren(const BaseClassList &bcl,bool hideSuper);
 
   private:
     ClassInheritanceNodeContext(const ClassDef *);
@@ -472,8 +469,8 @@ class ClassInheritanceContext : public RefCountedContext, public TemplateListInt
     static ClassInheritanceContext *alloc() { return new ClassInheritanceContext; }
 
     // TemplateListIntf
-    virtual int  count() const;
-    virtual TemplateVariant at(int index) const;
+    virtual uint count() const;
+    virtual TemplateVariant at(uint index) const;
     virtual TemplateListIntf::ConstIterator *createIterator() const;
     virtual int addRef()  { return RefCountedContext::addRef(); }
     virtual int release() { return RefCountedContext::release(); }
@@ -537,8 +534,8 @@ class NestingContext : public RefCountedContext, public TemplateListIntf
     { return new NestingContext(parent,level); }
 
     // TemplateListIntf
-    virtual int  count() const;
-    virtual TemplateVariant at(int index) const;
+    virtual uint count() const;
+    virtual TemplateVariant at(uint index) const;
     virtual TemplateListIntf::ConstIterator *createIterator() const;
     virtual int addRef()  { return RefCountedContext::addRef(); }
     virtual int release() { return RefCountedContext::release(); }
@@ -547,13 +544,13 @@ class NestingContext : public RefCountedContext, public TemplateListIntf
     void addClasses(const ClassSDict &clDict,bool rootOnly);
     void addDirs(const DirSDict &);
     void addDirs(const DirList &);
-    void addFiles(const FileNameList &);
+    void addFiles(const FileNameLinkedMap &);
     void addFiles(const FileList &);
     void addPages(const PageSDict &pages,bool rootOnly);
     void addModules(const GroupSDict &modules);
     void addModules(const GroupList &modules);
     void addClassHierarchy(const ClassSDict &clDict,bool rootOnly);
-    void addDerivedClasses(const BaseClassList *bcl,bool hideSuper);
+    void addDerivedClasses(const BaseClassList &bcl,bool hideSuper);
 
   private:
     NestingContext(const NestingNodeContext *parent,int level);
@@ -589,8 +586,8 @@ class NamespaceListContext : public RefCountedContext, public TemplateListIntf
     static NamespaceListContext *alloc() { return new NamespaceListContext; }
 
     // TemplateListIntf
-    virtual int  count() const;
-    virtual TemplateVariant at(int index) const;
+    virtual uint count() const;
+    virtual TemplateVariant at(uint index) const;
     virtual TemplateListIntf::ConstIterator *createIterator() const;
     virtual int addRef()  { return RefCountedContext::addRef(); }
     virtual int release() { return RefCountedContext::release(); }
@@ -629,8 +626,8 @@ class DirListContext : public RefCountedContext, public TemplateListIntf
     static DirListContext *alloc() { return new DirListContext; }
 
     // TemplateListIntf
-    virtual int  count() const;
-    virtual TemplateVariant at(int index) const;
+    virtual uint count() const;
+    virtual TemplateVariant at(uint index) const;
     virtual TemplateListIntf::ConstIterator *createIterator() const;
     virtual int addRef()  { return RefCountedContext::addRef(); }
     virtual int release() { return RefCountedContext::release(); }
@@ -650,8 +647,8 @@ class FileListContext : public RefCountedContext, public TemplateListIntf
     static FileListContext *alloc() { return new FileListContext; }
 
     // TemplateListIntf
-    virtual int  count() const;
-    virtual TemplateVariant at(int index) const;
+    virtual uint count() const;
+    virtual TemplateVariant at(uint index) const;
     virtual TemplateListIntf::ConstIterator *createIterator() const;
     virtual int addRef()  { return RefCountedContext::addRef(); }
     virtual int release() { return RefCountedContext::release(); }
@@ -690,8 +687,8 @@ class PageListContext : public RefCountedContext, public TemplateListIntf
     static PageListContext *alloc(const PageSDict *pages) { return new PageListContext(pages); }
 
     // TemplateListIntf methods
-    virtual int  count() const;
-    virtual TemplateVariant at(int index) const;
+    virtual uint count() const;
+    virtual TemplateVariant at(uint index) const;
     virtual TemplateListIntf::ConstIterator *createIterator() const;
     virtual int addRef()  { return RefCountedContext::addRef(); }
     virtual int release() { return RefCountedContext::release(); }
@@ -751,8 +748,8 @@ class ModuleListContext : public RefCountedContext, public TemplateListIntf
     static ModuleListContext *alloc() { return new ModuleListContext(); }
 
     // TemplateListIntf
-    virtual int  count() const;
-    virtual TemplateVariant at(int index) const;
+    virtual uint count() const;
+    virtual TemplateVariant at(uint index) const;
     virtual TemplateListIntf::ConstIterator *createIterator() const;
     virtual int addRef()  { return RefCountedContext::addRef(); }
     virtual int release() { return RefCountedContext::release(); }
@@ -794,8 +791,8 @@ class ExampleListContext : public RefCountedContext, public TemplateListIntf
     static ExampleListContext *alloc() { return new ExampleListContext; }
 
     // TemplateListIntf methods
-    virtual int  count() const;
-    virtual TemplateVariant at(int index) const;
+    virtual uint count() const;
+    virtual TemplateVariant at(uint index) const;
     virtual TemplateListIntf::ConstIterator *createIterator() const;
     virtual int addRef()  { return RefCountedContext::addRef(); }
     virtual int release() { return RefCountedContext::release(); }
@@ -929,18 +926,18 @@ class InheritanceNodeContext : public RefCountedContext, public TemplateStructIn
 class InheritanceListContext : public RefCountedContext, public TemplateListIntf
 {
   public:
-    static InheritanceListContext *alloc(const BaseClassList *list,bool baseClasses)
+    static InheritanceListContext *alloc(const BaseClassList &list,bool baseClasses)
     { return new InheritanceListContext(list,baseClasses); }
 
     // TemplateListIntf
-    virtual int  count() const;
-    virtual TemplateVariant at(int index) const;
+    virtual uint count() const;
+    virtual TemplateVariant at(uint index) const;
     virtual TemplateListIntf::ConstIterator *createIterator() const;
     virtual int addRef()  { return RefCountedContext::addRef(); }
     virtual int release() { return RefCountedContext::release(); }
 
   private:
-    InheritanceListContext(const BaseClassList *list,bool baseClasses);
+    InheritanceListContext(const BaseClassList &list,bool baseClasses);
    ~InheritanceListContext();
     class Private;
     Private *p;
@@ -957,10 +954,12 @@ class MemberListContext : public RefCountedContext, public TemplateListIntf
     { return new MemberListContext(ml); }
     static MemberListContext *alloc(MemberSDict *ml,bool doSort)
     { return new MemberListContext(ml,doSort); }
+    static MemberListContext *alloc(std::vector<const MemberDef *> &&ml)
+    { return new MemberListContext(std::move(ml)); }
 
     // TemplateListIntf
-    virtual int  count() const;
-    virtual TemplateVariant at(int index) const;
+    virtual uint count() const;
+    virtual TemplateVariant at(uint index) const;
     virtual TemplateListIntf::ConstIterator *createIterator() const;
     virtual int addRef()  { return RefCountedContext::addRef(); }
     virtual int release() { return RefCountedContext::release(); }
@@ -969,6 +968,7 @@ class MemberListContext : public RefCountedContext, public TemplateListIntf
     MemberListContext();
     MemberListContext(const MemberList *ml);
     MemberListContext(MemberSDict *ml,bool doSort);
+    MemberListContext(std::vector<const MemberDef *> &&ml);
    ~MemberListContext();
     class Private;
     Private *p;
@@ -1007,8 +1007,8 @@ class MemberGroupListContext : public RefCountedContext, public TemplateListIntf
     { return new MemberGroupListContext(def,relPath,dict,subGrouping); }
 
     // TemplateListIntf
-    virtual int  count() const;
-    virtual TemplateVariant at(int index) const;
+    virtual uint count() const;
+    virtual TemplateVariant at(uint index) const;
     virtual TemplateListIntf::ConstIterator *createIterator() const;
     virtual int addRef()  { return RefCountedContext::addRef(); }
     virtual int release() { return RefCountedContext::release(); }
@@ -1095,8 +1095,8 @@ class InheritedMemberInfoListContext : public RefCountedContext, public Template
     void addMemberList(const ClassDef *cd,MemberListType lt,const QCString &title,bool additionalList=TRUE);
 
     // TemplateListIntf
-    virtual int  count() const;
-    virtual TemplateVariant at(int index) const;
+    virtual uint count() const;
+    virtual TemplateVariant at(uint index) const;
     virtual TemplateListIntf::ConstIterator *createIterator() const;
     virtual int addRef()  { return RefCountedContext::addRef(); }
     virtual int release() { return RefCountedContext::release(); }
@@ -1113,21 +1113,18 @@ class InheritedMemberInfoListContext : public RefCountedContext, public Template
 class AllMembersListContext : public RefCountedContext, public TemplateListIntf
 {
   public:
-    static AllMembersListContext *alloc()
-    { return new AllMembersListContext; }
-    static AllMembersListContext *alloc(const MemberNameInfoSDict *ml)
+    static AllMembersListContext *alloc(const MemberNameInfoLinkedMap &ml)
     { return new AllMembersListContext(ml); }
 
     // TemplateListIntf
-    virtual int  count() const;
-    virtual TemplateVariant at(int index) const;
+    virtual uint count() const;
+    virtual TemplateVariant at(uint index) const;
     virtual TemplateListIntf::ConstIterator *createIterator() const;
     virtual int addRef()  { return RefCountedContext::addRef(); }
     virtual int release() { return RefCountedContext::release(); }
 
   private:
-    AllMembersListContext();
-    AllMembersListContext(const MemberNameInfoSDict *ml);
+    AllMembersListContext(const MemberNameInfoLinkedMap &ml);
    ~AllMembersListContext();
     class Private;
     Private *p;
@@ -1163,8 +1160,8 @@ class ArgumentListContext : public RefCountedContext, public TemplateListIntf
     { return new ArgumentListContext(al,def,relPath); }
 
     // TemplateListIntf
-    virtual int  count() const;
-    virtual TemplateVariant at(int index) const;
+    virtual uint count() const;
+    virtual TemplateVariant at(uint index) const;
     virtual TemplateListIntf::ConstIterator *createIterator() const;
     virtual int addRef()  { return RefCountedContext::addRef(); }
     virtual int release() { return RefCountedContext::release(); }
@@ -1206,8 +1203,8 @@ class SymbolListContext : public RefCountedContext, public TemplateListIntf
     { return new SymbolListContext(sdl); }
 
     // TemplateListIntf
-    virtual int  count() const;
-    virtual TemplateVariant at(int index) const;
+    virtual uint count() const;
+    virtual TemplateVariant at(uint index) const;
     virtual TemplateListIntf::ConstIterator *createIterator() const;
     virtual int addRef()  { return RefCountedContext::addRef(); }
     virtual int release() { return RefCountedContext::release(); }
@@ -1248,8 +1245,8 @@ class SymbolGroupListContext : public RefCountedContext, public TemplateListIntf
     { return new SymbolGroupListContext(sil); }
 
     // TemplateListIntf
-    virtual int  count() const;
-    virtual TemplateVariant at(int index) const;
+    virtual uint count() const;
+    virtual TemplateVariant at(uint index) const;
     virtual TemplateListIntf::ConstIterator *createIterator() const;
     virtual int addRef()  { return RefCountedContext::addRef(); }
     virtual int release() { return RefCountedContext::release(); }
@@ -1290,8 +1287,8 @@ class SymbolIndicesContext : public RefCountedContext, public TemplateListIntf
     { return new SymbolIndicesContext(info); }
 
     // TemplateListIntf
-    virtual int  count() const;
-    virtual TemplateVariant at(int index) const;
+    virtual uint count() const;
+    virtual TemplateVariant at(uint index) const;
     virtual TemplateListIntf::ConstIterator *createIterator() const;
     virtual int addRef()  { return RefCountedContext::addRef(); }
     virtual int release() { return RefCountedContext::release(); }
@@ -1331,8 +1328,8 @@ class SearchIndicesContext : public RefCountedContext, public TemplateListIntf
     static SearchIndicesContext *alloc() { return new SearchIndicesContext; }
 
     // TemplateListIntf
-    virtual int  count() const;
-    virtual TemplateVariant at(int index) const;
+    virtual uint count() const;
+    virtual TemplateVariant at(uint index) const;
     virtual TemplateListIntf::ConstIterator *createIterator() const;
     virtual int addRef()  { return RefCountedContext::addRef(); }
     virtual int release() { return RefCountedContext::release(); }

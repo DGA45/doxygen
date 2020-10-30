@@ -1,9 +1,6 @@
 /******************************************************************************
  *
- * 
- *
- *
- * Copyright (C) 1997-2015 by Dimitri van Heesch.
+ * Copyright (C) 1997-2020 by Dimitri van Heesch.
  *
  * Permission to use, copy, modify, and distribute this software and its
  * documentation under the terms of the GNU General Public License is hereby
@@ -15,6 +12,7 @@
  * input used in their production; they are not affected by this license.
  *
  */
+
 
 #include <qfileinfo.h>
 
@@ -55,7 +53,7 @@ static QCString filterId(const char *s)
   static GrowBuf growBuf;
   growBuf.clear();
   if (s==0) return "";
-  const unsigned char *p=(const unsigned char *)s;
+  const char *p=s;
   char c;
   while ((c=*p++))
   {
@@ -155,7 +153,7 @@ void DocbookDocVisitor::visitPostEnd(FTextStream &t, bool hasCaption, bool inlin
 }
 
 DocbookDocVisitor::DocbookDocVisitor(FTextStream &t,CodeOutputInterface &ci)
-  : DocVisitor(DocVisitor_Docbook), m_t(t), m_ci(ci), m_insidePre(FALSE), m_hide(FALSE)
+  : DocVisitor(DocVisitor_Docbook), m_t(t), m_ci(ci)
 {
 DB_VIS_C
   // m_t << "<section>" << endl;
@@ -318,9 +316,11 @@ DB_VIS_C
   {
     case DocVerbatim::Code: // fall though
       m_t << "<literallayout><computeroutput>";
-      Doxygen::parserManager->getCodeParser(m_langExt)
-         .parseCode(m_ci,s->context(),s->text(),langExt,
-            s->isExample(),s->exampleFile());
+      getCodeParser(m_langExt).parseCode(m_ci,s->context(),
+                                         s->text(),
+                                         langExt,
+                                         s->isExample(),
+                                         s->exampleFile());
       m_t << "</computeroutput></literallayout>";
       break;
     case DocVerbatim::Verbatim:
@@ -328,17 +328,17 @@ DB_VIS_C
       filter(s->text());
       m_t << "</computeroutput></literallayout>";
       break;
-    case DocVerbatim::HtmlOnly:    
+    case DocVerbatim::HtmlOnly:
       break;
-    case DocVerbatim::RtfOnly:     
+    case DocVerbatim::RtfOnly:
       break;
-    case DocVerbatim::ManOnly:     
+    case DocVerbatim::ManOnly:
       break;
-    case DocVerbatim::LatexOnly:   
+    case DocVerbatim::LatexOnly:
       break;
-    case DocVerbatim::XmlOnly:     
+    case DocVerbatim::XmlOnly:
       break;
-    case DocVerbatim::DocbookOnly: 
+    case DocVerbatim::DocbookOnly:
       m_t << s->text();
       break;
     case DocVerbatim::Dot:
@@ -398,7 +398,7 @@ DB_VIS_C
         int i;
         if ((i=shortName.findRev('/'))!=-1)
         {
-          shortName=shortName.right(shortName.length()-i-1);
+          shortName=shortName.right((int)shortName.length()-i-1);
         }
         m_t << "<para>" << endl;
         writePlantUMLFile(baseName,s);
@@ -427,24 +427,22 @@ DB_VIS_C
         m_t << "<literallayout><computeroutput>";
         QFileInfo cfi( inc->file() );
         FileDef *fd = createFileDef( cfi.dirPath().utf8(), cfi.fileName().utf8() );
-        Doxygen::parserManager->getCodeParser(inc->extension())
-           .parseCode(m_ci,inc->context(),
-              inc->text(),
-              langExt,
-              inc->isExample(),
-              inc->exampleFile(), fd);
+        getCodeParser(inc->extension()).parseCode(m_ci,inc->context(),
+                                                  inc->text(),
+                                                  langExt,
+                                                  inc->isExample(),
+                                                  inc->exampleFile(), fd);
         delete fd;
         m_t << "</computeroutput></literallayout>";
       }
       break;
     case DocInclude::Include:
       m_t << "<literallayout><computeroutput>";
-      Doxygen::parserManager->getCodeParser(inc->extension())
-         .parseCode(m_ci,inc->context(),
-            inc->text(),
-            langExt,
-            inc->isExample(),
-            inc->exampleFile());
+      getCodeParser(inc->extension()).parseCode(m_ci,inc->context(),
+                                                inc->text(),
+                                                langExt,
+                                                inc->isExample(),
+                                                inc->exampleFile());
       m_t << "</computeroutput></literallayout>";
       break;
     case DocInclude::DontInclude:
@@ -465,14 +463,13 @@ DB_VIS_C
       break;
     case DocInclude::Snippet:
       m_t << "<literallayout><computeroutput>";
-      Doxygen::parserManager->getCodeParser(inc->extension())
-         .parseCode(m_ci,
-            inc->context(),
-            extractBlock(inc->text(),inc->blockId()),
-            langExt,
-            inc->isExample(),
-            inc->exampleFile()
-            );
+      getCodeParser(inc->extension()).parseCode(m_ci,
+                                                inc->context(),
+                                                extractBlock(inc->text(),inc->blockId()),
+                                                langExt,
+                                                inc->isExample(),
+                                                inc->exampleFile()
+                                               );
       m_t << "</computeroutput></literallayout>";
       break;
     case DocInclude::SnipWithLines:
@@ -480,13 +477,12 @@ DB_VIS_C
          QFileInfo cfi( inc->file() );
          FileDef *fd = createFileDef( cfi.dirPath().utf8(), cfi.fileName().utf8() );
          m_t << "<literallayout><computeroutput>";
-         Doxygen::parserManager->getCodeParser(inc->extension())
-                                .parseCode(m_ci,
+         getCodeParser(inc->extension()).parseCode(m_ci,
                                            inc->context(),
                                            extractBlock(inc->text(),inc->blockId()),
                                            langExt,
                                            inc->isExample(),
-                                           inc->exampleFile(), 
+                                           inc->exampleFile(),
                                            fd,
                                            lineBlock(inc->text(),inc->blockId()),
                                            -1,    // endLine
@@ -498,8 +494,8 @@ DB_VIS_C
          m_t << "</computeroutput></literallayout>";
       }
       break;
-    case DocInclude::SnippetDoc: 
-    case DocInclude::IncludeDoc: 
+    case DocInclude::SnippetDoc:
+    case DocInclude::IncludeDoc:
       err("Internal inconsistency: found switch SnippetDoc / IncludeDoc in file: %s"
           "Please create a bug report\n",__FILE__);
       break;
@@ -533,17 +529,16 @@ DB_VIS_C
         fd = createFileDef( cfi.dirPath().utf8(), cfi.fileName().utf8() );
       }
 
-      Doxygen::parserManager->getCodeParser(locLangExt)
-         .parseCode(m_ci,op->context(),
-            op->text(),langExt,op->isExample(),
-            op->exampleFile(),
-            fd,     // fileDef
-            op->line(),    // startLine
-            -1,    // endLine
-            FALSE, // inline fragment
-            0,     // memberDef
-            op->showLineNo()  // show line numbers
-         );
+      getCodeParser(locLangExt).parseCode(m_ci,op->context(),
+                                        op->text(),langExt,op->isExample(),
+                                        op->exampleFile(),
+                                        fd,     // fileDef
+                                        op->line(),    // startLine
+                                        -1,    // endLine
+                                        FALSE, // inline fragment
+                                        0,     // memberDef
+                                        op->showLineNo()  // show line numbers
+                                       );
       if (fd) delete fd;
     }
     pushEnabled();
@@ -680,152 +675,152 @@ DB_VIS_C
   switch(s->type())
   {
     case DocSimpleSect::See:
-      if (m_insidePre) 
+      if (m_insidePre)
       {
         m_t << "<formalpara><title>" << theTranslator->trSeeAlso() << "</title>" << endl;
-      } 
-      else 
+      }
+      else
       {
         m_t << "<formalpara><title>" << convertToDocBook(theTranslator->trSeeAlso()) << "</title>" << endl;
       }
       break;
     case DocSimpleSect::Return:
-      if (m_insidePre) 
+      if (m_insidePre)
       {
         m_t << "<formalpara><title>" << theTranslator->trReturns()<< "</title>" << endl;
-      } 
-      else 
+      }
+      else
       {
         m_t << "<formalpara><title>" << convertToDocBook(theTranslator->trReturns()) << "</title>" << endl;
       }
       break;
     case DocSimpleSect::Author:
-      if (m_insidePre) 
+      if (m_insidePre)
       {
         m_t << "<formalpara><title>" << theTranslator->trAuthor(TRUE, TRUE) << "</title>" << endl;
-      } 
-      else 
+      }
+      else
       {
         m_t << "<formalpara><title>" << convertToDocBook(theTranslator->trAuthor(TRUE, TRUE)) << "</title>" << endl;
       }
       break;
     case DocSimpleSect::Authors:
-      if (m_insidePre) 
+      if (m_insidePre)
       {
         m_t << "<formalpara><title>" << theTranslator->trAuthor(TRUE, FALSE) << "</title>" << endl;
-      } 
-      else 
+      }
+      else
       {
         m_t << "<formalpara><title>" << convertToDocBook(theTranslator->trAuthor(TRUE, FALSE)) << "</title>" << endl;
       }
       break;
     case DocSimpleSect::Version:
-      if (m_insidePre) 
+      if (m_insidePre)
       {
         m_t << "<formalpara><title>" << theTranslator->trVersion() << "</title>" << endl;
-      } 
-      else 
+      }
+      else
       {
         m_t << "<formalpara><title>" << convertToDocBook(theTranslator->trVersion()) << "</title>" << endl;
       }
       break;
     case DocSimpleSect::Since:
-      if (m_insidePre) 
+      if (m_insidePre)
       {
         m_t << "<formalpara><title>" << theTranslator->trSince() << "</title>" << endl;
-      } 
-      else 
+      }
+      else
       {
         m_t << "<formalpara><title>" << convertToDocBook(theTranslator->trSince()) << "</title>" << endl;
       }
       break;
     case DocSimpleSect::Date:
-      if (m_insidePre) 
+      if (m_insidePre)
       {
         m_t << "<formalpara><title>" << theTranslator->trDate() << "</title>" << endl;
-      } 
-      else 
+      }
+      else
       {
         m_t << "<formalpara><title>" << convertToDocBook(theTranslator->trDate()) << "</title>" << endl;
       }
       break;
     case DocSimpleSect::Note:
-      if (m_insidePre) 
+      if (m_insidePre)
       {
         m_t << "<note><title>" << theTranslator->trNote() << "</title>" << endl;
-      } 
-      else 
+      }
+      else
       {
         m_t << "<note><title>" << convertToDocBook(theTranslator->trNote()) << "</title>" << endl;
       }
       break;
     case DocSimpleSect::Warning:
-      if (m_insidePre) 
+      if (m_insidePre)
       {
         m_t << "<warning><title>" << theTranslator->trWarning() << "</title>" << endl;
-      } 
-      else 
+      }
+      else
       {
         m_t << "<warning><title>" << convertToDocBook(theTranslator->trWarning()) << "</title>" << endl;
       }
       break;
     case DocSimpleSect::Pre:
-      if (m_insidePre) 
+      if (m_insidePre)
       {
         m_t << "<formalpara><title>" << theTranslator->trPrecondition() << "</title>" << endl;
-      } 
-      else 
+      }
+      else
       {
         m_t << "<formalpara><title>" << convertToDocBook(theTranslator->trPrecondition()) << "</title>" << endl;
       }
       break;
     case DocSimpleSect::Post:
-      if (m_insidePre) 
+      if (m_insidePre)
       {
         m_t << "<formalpara><title>" << theTranslator->trPostcondition() << "</title>" << endl;
-      } 
-      else 
+      }
+      else
       {
         m_t << "<formalpara><title>" << convertToDocBook(theTranslator->trPostcondition()) << "</title>" << endl;
       }
       break;
     case DocSimpleSect::Copyright:
-      if (m_insidePre) 
+      if (m_insidePre)
       {
         m_t << "<formalpara><title>" << theTranslator->trCopyright() << "</title>" << endl;
-      } 
-      else 
+      }
+      else
       {
         m_t << "<formalpara><title>" << convertToDocBook(theTranslator->trCopyright()) << "</title>" << endl;
       }
       break;
     case DocSimpleSect::Invar:
-      if (m_insidePre) 
+      if (m_insidePre)
       {
         m_t << "<formalpara><title>" << theTranslator->trInvariant() << "</title>" << endl;
-      } 
-      else 
+      }
+      else
       {
         m_t << "<formalpara><title>" << convertToDocBook(theTranslator->trInvariant()) << "</title>" << endl;
       }
       break;
     case DocSimpleSect::Remark:
       // <remark> is miising the <title> possibility
-      if (m_insidePre) 
+      if (m_insidePre)
       {
         m_t << "<formalpara><title>" << theTranslator->trRemarks() << "</title>" << endl;
-      } 
-      else 
+      }
+      else
       {
         m_t << "<formalpara><title>" << convertToDocBook(theTranslator->trRemarks()) << "</title>" << endl;
       }
       break;
     case DocSimpleSect::Attention:
-      if (m_insidePre) 
+      if (m_insidePre)
       {
         m_t << "<caution><title>" << theTranslator->trAttention() << "</title>" << endl;
-      } 
-      else 
+      }
+      else
       {
         m_t << "<caution><title>" << convertToDocBook(theTranslator->trAttention()) << "</title>" << endl;
       }
@@ -1006,12 +1001,10 @@ DB_VIS_C
   m_t << "</listitem></varlistentry>\n";
 }
 
-static int colCnt = 0;
-static bool bodySet = FALSE; // it is possible to have tables without a header
 void DocbookDocVisitor::visitPre(DocHtmlTable *t)
 {
 DB_VIS_C
-  bodySet = FALSE;
+  m_bodySet.push(false);
   if (m_hide) return;
   m_t << "<informaltable frame=\"all\">" << endl;
   m_t << "    <tgroup cols=\"" << t->numColumns() << "\" align=\"left\" colsep=\"1\" rowsep=\"1\">" << endl;
@@ -1026,8 +1019,8 @@ void DocbookDocVisitor::visitPost(DocHtmlTable *)
 {
 DB_VIS_C
   if (m_hide) return;
-  if (bodySet) m_t << "    </tbody>" << endl;
-  bodySet = FALSE;
+  if (m_bodySet.top()) m_t << "    </tbody>" << endl;
+  m_bodySet.pop();
   m_t << "    </tgroup>" << endl;
   m_t << "</informaltable>" << endl;
 }
@@ -1035,13 +1028,18 @@ DB_VIS_C
 void DocbookDocVisitor::visitPre(DocHtmlRow *tr)
 {
 DB_VIS_C
-  colCnt = 0;
+  m_colCnt = 0;
   if (m_hide) return;
 
-  if (tr->isHeading()) m_t << "<thead>\n";
-  else if (!bodySet)
+  if (tr->isHeading())
   {
-    bodySet = TRUE;
+    if (m_bodySet.top()) m_t << "</tbody>\n";
+    m_bodySet.top() = false;
+    m_t << "<thead>\n";
+  }
+  else if (!m_bodySet.top())
+  {
+    m_bodySet.top() = true;
     m_t << "<tbody>\n";
   }
 
@@ -1067,15 +1065,15 @@ DB_VIS_C
   m_t << "</row>\n";
   if (tr->isHeading())
   {
-    bodySet = TRUE;
     m_t << "</thead><tbody>\n";
+    m_bodySet.top() = true;
   }
 }
 
 void DocbookDocVisitor::visitPre(DocHtmlCell *c)
 {
 DB_VIS_C
-  colCnt++;
+  m_colCnt++;
   if (m_hide) return;
   m_t << "<entry";
 
@@ -1085,10 +1083,10 @@ DB_VIS_C
   {
     if (opt->name=="colspan")
     {
-      m_t << " namest='c" << colCnt << "'";
+      m_t << " namest='c" << m_colCnt << "'";
       int cols = opt->value.toInt();
-      colCnt += (cols - 1);
-      m_t << " nameend='c" << colCnt << "'";
+      m_colCnt += (cols - 1);
+      m_t << " nameend='c" << m_colCnt << "'";
     }
     else if (opt->name=="rowspan")
     {
@@ -1127,14 +1125,14 @@ DB_VIS_C
   m_t << ">";
 }
 
-void DocbookDocVisitor::visitPost(DocHtmlCell *c)
+void DocbookDocVisitor::visitPost(DocHtmlCell *)
 {
 DB_VIS_C
   if (m_hide) return;
   m_t << "</entry>";
 }
 
-void DocbookDocVisitor::visitPre(DocHtmlCaption *c)
+void DocbookDocVisitor::visitPre(DocHtmlCaption *)
 {
 DB_VIS_C
   if (m_hide) return;
@@ -1201,7 +1199,7 @@ DB_VIS_C
     int i;
     if ((i=baseName.findRev('/'))!=-1 || (i=baseName.findRev('\\'))!=-1)
     {
-      baseName=baseName.right(baseName.length()-i-1);
+      baseName=baseName.right((int)baseName.length()-i-1);
     }
     visitPreStart(m_t, img->children(), img->hasCaption(), img->relPath() + baseName, img->width(), img->height(), img->isInlineImage());
   }
@@ -1224,12 +1222,12 @@ DB_VIS_C
     int i;
     if ((i=baseName.findRev('/'))!=-1 || (i=baseName.findRev('\\'))!=-1)
     {
-      baseName=baseName.right(baseName.length()-i-1);
+      baseName=baseName.right((int)baseName.length()-i-1);
     }
     QCString m_file;
     bool ambig;
-    FileDef *fd=findFileDef(Doxygen::imageNameDict, baseName, ambig);
-    if (fd) 
+    FileDef *fd=findFileDef(Doxygen::imageNameLinkedMap, baseName, ambig);
+    if (fd)
     {
       m_file=fd->absFilePath();
     }
@@ -1246,8 +1244,8 @@ DB_VIS_C
         delete[] buffer;
       }
     }
-  } 
-  else 
+  }
+  else
   {
     popEnabled();
   }
@@ -1331,7 +1329,7 @@ DB_VIS_C
   if (!ref->file().isEmpty()) endLink();
 }
 
-void DocbookDocVisitor::visitPre(DocSecRefItem *ref)
+void DocbookDocVisitor::visitPre(DocSecRefItem *)
 {
 DB_VIS_C
   if (m_hide) return;
@@ -1414,11 +1412,9 @@ DB_VIS_C
   if (m_hide) return;
   m_t << "                            <row>" << endl;
 
-  DocParamSect::Type parentType = DocParamSect::Unknown;
   DocParamSect *sect = 0;
   if (pl->parent() && pl->parent()->kind()==DocNode::Kind_ParamSect)
   {
-    parentType = ((DocParamSect*)pl->parent())->type();
     sect=(DocParamSect*)pl->parent();
   }
 
@@ -1621,16 +1617,14 @@ DB_VIS_C
 void DocbookDocVisitor::pushEnabled()
 {
 DB_VIS_C
-  m_enabled.push(new bool(m_hide));
+  m_enabled.push(m_hide);
 }
 
 void DocbookDocVisitor::popEnabled()
 {
 DB_VIS_C
-  bool *v=m_enabled.pop();
-  ASSERT(v!=0);
-  m_hide = *v;
-  delete v;
+  m_hide=m_enabled.top();
+  m_enabled.pop();
 }
 
 void DocbookDocVisitor::writeMscFile(const QCString &baseName, DocVerbatim *s)
@@ -1640,7 +1634,7 @@ DB_VIS_C
   int i;
   if ((i=shortName.findRev('/'))!=-1)
   {
-    shortName=shortName.right(shortName.length()-i-1);
+    shortName=shortName.right((int)shortName.length()-i-1);
   }
   QCString outDir = Config_getString(DOCBOOK_OUTPUT);
   writeMscGraphFromFile(baseName+".msc",outDir,shortName,MSC_BITMAP);
@@ -1656,7 +1650,7 @@ DB_VIS_C
   int i;
   if ((i=shortName.findRev('/'))!=-1)
   {
-    shortName=shortName.right(shortName.length()-i-1);
+    shortName=shortName.right((int)shortName.length()-i-1);
   }
   QCString outDir = Config_getString(DOCBOOK_OUTPUT);
   PlantumlManager::instance()->generatePlantUMLOutput(baseName,outDir,PlantumlManager::PUML_BITMAP);
@@ -1677,7 +1671,7 @@ DB_VIS_C
   int i;
   if ((i=baseName.findRev('/'))!=-1)
   {
-    baseName=baseName.right(baseName.length()-i-1);
+    baseName=baseName.right((int)baseName.length()-i-1);
   }
   if ((i=baseName.find('.'))!=-1)
   {
@@ -1705,7 +1699,7 @@ DB_VIS_C
   int i;
   if ((i=shortName.findRev('/'))!=-1)
   {
-    shortName=shortName.right(shortName.length()-i-1);
+    shortName=shortName.right((int)shortName.length()-i-1);
   }
   QCString outDir = Config_getString(DOCBOOK_OUTPUT);
   writeDiaGraphFromFile(baseName+".dia",outDir,shortName,DIA_BITMAP);
@@ -1726,7 +1720,7 @@ DB_VIS_C
   int i;
   if ((i=baseName.findRev('/'))!=-1)
   {
-    baseName=baseName.right(baseName.length()-i-1);
+    baseName=baseName.right((int)baseName.length()-i-1);
   }
   if ((i=baseName.find('.'))!=-1)
   {
@@ -1754,7 +1748,7 @@ DB_VIS_C
   int i;
   if ((i=shortName.findRev('/'))!=-1)
   {
-    shortName=shortName.right(shortName.length()-i-1);
+    shortName=shortName.right((int)shortName.length()-i-1);
   }
   QCString outDir = Config_getString(DOCBOOK_OUTPUT);
   writeDotGraphFromFile(baseName+".dot",outDir,shortName,GOF_BITMAP);
@@ -1775,7 +1769,7 @@ DB_VIS_C
   int i;
   if ((i=baseName.findRev('/'))!=-1)
   {
-    baseName=baseName.right(baseName.length()-i-1);
+    baseName=baseName.right((int)baseName.length()-i-1);
   }
   if ((i=baseName.find('.'))!=-1)
   {

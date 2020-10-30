@@ -1,12 +1,12 @@
 /******************************************************************************
  *
- * 
+ *
  *
  * Copyright (C) 1997-2015 by Dimitri van Heesch.
  *
  * Permission to use, copy, modify, and distribute this software and its
- * documentation under the terms of the GNU General Public License is hereby 
- * granted. No representations are made about the suitability of this software 
+ * documentation under the terms of the GNU General Public License is hereby
+ * granted. No representations are made about the suitability of this software
  * for any purpose. It is provided "as is" without express or implied warranty.
  * See the GNU General Public License for more details.
  *
@@ -105,7 +105,7 @@ class MemberList : private QList<MemberDef>
     int m_dictCnt;
     int m_protoCnt;
     int m_defCnt;
-    int m_friendCnt; 
+    int m_friendCnt;
     */
     int m_numDecMembers; // number of members in the brief part of the memberlist
     int m_numDecEnumValues;
@@ -131,7 +131,7 @@ class MemberListIterator : public QListIterator<MemberDef>
 class MemberDict : public QDict<MemberDef>
 {
   public:
-    MemberDict(int size) : QDict<MemberDef>(size) {}
+    MemberDict(uint size) : QDict<MemberDef>(size) {}
     virtual ~MemberDict() {}
 };
 
@@ -139,11 +139,12 @@ class MemberDict : public QDict<MemberDef>
 class MemberSDict : public SDict<MemberDef>
 {
   public:
-    MemberSDict(int size=17) : SDict<MemberDef>(size) {}
+    MemberSDict(uint size=17) : SDict<MemberDef>(size) {}
     virtual ~MemberSDict() {}
   private:
     int compareValues(const MemberDef *item1,const MemberDef *item2) const;
 };
 
+int genericCompareMembers(const MemberDef *c1,const MemberDef *c2);
 
 #endif

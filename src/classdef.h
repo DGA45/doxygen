@@ -1,12 +1,12 @@
 /******************************************************************************
  *
- * 
+ *
  *
  * Copyright (C) 1997-2015 by Dimitri van Heesch.
  *
  * Permission to use, copy, modify, and distribute this software and its
- * documentation under the terms of the GNU General Public License is hereby 
- * granted. No representations are made about the suitability of this software 
+ * documentation under the terms of the GNU General Public License is hereby
+ * granted. No representations are made about the suitability of this software
  * for any purpose. It is provided "as is" without express or implied warranty.
  * See the GNU General Public License for more details.
  *
@@ -24,7 +24,9 @@
 #include <qdict.h>
 #include <qptrdict.h>
 
+#include "containers.h"
 #include "definition.h"
+#include "arguments.h"
 
 struct Argument;
 class MemberDef;
@@ -35,11 +37,10 @@ class ClassSDict;
 class OutputList;
 class FileDef;
 class FileList;
-class BaseClassList;
 class NamespaceDef;
 class MemberDef;
 class ExampleSDict;
-class MemberNameInfoSDict;
+class MemberNameInfoLinkedMap;
 class UsesClassDict;
 class ConstraintClassDict;
 class MemberGroupSDict;
@@ -49,8 +50,39 @@ class GroupDef;
 class StringDict;
 struct IncludeInfo;
 class ClassDefImpl;
-class ArgumentList;
 class FTextStream;
+class ClassDef;
+
+/** Class that contains information about an inheritance relation.
+ */
+struct BaseClassDef
+{
+  BaseClassDef(ClassDef *cd,const char *n,Protection p, Specifier v,const char *t) :
+        classDef(cd), usedName(n), prot(p), virt(v), templSpecifiers(t) {}
+
+  /** Class definition that this relation inherits from. */
+  ClassDef *classDef;
+
+  /** name used in the inheritance list
+   * (may be a typedef name instead of the class name)
+   */
+  QCString   usedName;
+
+  /** Protection level of the inheritance relation:
+   *  Public, Protected, or Private
+   */
+  Protection prot;
+
+  /** Virtualness of the inheritance relation:
+   *  Normal, or Virtual
+   */
+  Specifier  virt;
+
+  /** Template arguments used for the base class */
+  QCString templSpecifiers;
+};
+
+using BaseClassList = std::vector<BaseClassDef>;
 
 /** A abstract class representing of a compound symbol.
  *
@@ -61,8 +93,8 @@ class ClassDef : virtual public Definition
 {
   public:
     /** The various compound types */
-    enum CompoundType { Class,     //=Entry::CLASS_SEC, 
-                        Struct,    //=Entry::STRUCT_SEC, 
+    enum CompoundType { Class,     //=Entry::CLASS_SEC,
+                        Struct,    //=Entry::STRUCT_SEC,
                         Union,     //=Entry::UNION_SEC,
                         Interface, //=Entry::INTERFACE_SEC,
                         Protocol,  //=Entry::PROTOCOL_SEC,
@@ -76,7 +108,7 @@ class ClassDef : virtual public Definition
 
 
     //-----------------------------------------------------------------------------------
-    // --- getters 
+    // --- getters
     //-----------------------------------------------------------------------------------
 
     /** Used for RTTI, this is a class */
@@ -125,16 +157,22 @@ class ClassDef : virtual public Definition
     /** Returns the list of base classes from which this class directly
      *  inherits.
      */
-    virtual BaseClassList *baseClasses() const = 0;
+    virtual BaseClassList baseClasses() const = 0;
+
+    /** Update the list of base classes to the one passed */
+    virtual void updateBaseClasses(const BaseClassList &bcd) = 0;
 
     /** Returns the list of sub classes that directly derive from this class
      */
-    virtual BaseClassList *subClasses() const = 0;
+    virtual BaseClassList subClasses() const = 0;
+
+    /** Update the list of sub classes to the one passed */
+    virtual void updateSubClasses(const BaseClassList &bcd) = 0;
 
     /** Returns a dictionary of all members. This includes any inherited
      *  members. Members are sorted alphabetically.
      */
-    virtual MemberNameInfoSDict *memberNameInfoSDict() const = 0;
+    virtual const MemberNameInfoLinkedMap &memberNameInfoLinkedMap() const = 0;
 
     /** Return the protection level (Public,Protected,Private) in which
      *  this compound was found.
@@ -229,10 +267,10 @@ class ClassDef : virtual public Definition
      *  will return a list with one ArgumentList containing one argument
      *  with type="class" and name="T".
      */
-    virtual std::vector<ArgumentList> getTemplateParameterLists() const = 0;
+    virtual ArgumentLists getTemplateParameterLists() const = 0;
 
     virtual QCString qualifiedNameWithTemplateParameters(
-        const std::vector<ArgumentList> *actualParams=0,int *actualParamIndex=0) const = 0;
+        const ArgumentLists *actualParams=0,uint *actualParamIndex=0) const = 0;
 
     /** Returns TRUE if there is at least one pure virtual member in this
      *  class.
@@ -371,6 +409,7 @@ class ClassDef : virtual public Definition
     virtual void removeMemberFromLists(MemberDef *md) = 0;
     virtual void setAnonymousEnumType() = 0;
     virtual void countMembers() = 0;
+    virtual void sortAllMembersList() = 0;
 
     //-----------------------------------------------------------------------------------
     // --- write output ----
@@ -426,24 +465,21 @@ ClassDef *createClassDefAlias(const Definition *newScope,const ClassDef *cd);
 
 //------------------------------------------------------------------------
 
-/** Class that contains information about a usage relation. 
+/** Class that contains information about a usage relation.
  */
 struct UsesClassDef
 {
-  UsesClassDef(ClassDef *cd) : classDef(cd) 
-  { 
-    accessors = new QDict<void>(17); 
-    containment = TRUE;
+  UsesClassDef(ClassDef *cd) : classDef(cd)
+  {
   }
  ~UsesClassDef()
   {
-    delete accessors;
   }
   void addAccessor(const char *s)
   {
-    if (accessors->find(s)==0)
+    if (accessors.find(s)==accessors.end())
     {
-      accessors->insert(s,(void *)666);
+      accessors.insert(s);
     }
   }
   /** Class definition that this relation uses. */
@@ -452,91 +488,31 @@ struct UsesClassDef
   /** Dictionary of member variable names that form the edge labels of the
    *  usage relation.
    */
-  QDict<void> *accessors;
+  StringSet accessors;
 
   /** Template arguments used for the base class */
   QCString templSpecifiers;
 
-  bool containment;
+  bool containment = true;
 };
 
-/** Dictionary of usage relations. 
+/** Dictionary of usage relations.
  */
 class UsesClassDict : public QDict<UsesClassDef>
 {
   public:
-    UsesClassDict(int size) : QDict<UsesClassDef>(size) {}
+    UsesClassDict(uint size) : QDict<UsesClassDef>(size) {}
    ~UsesClassDict() {}
 };
 
-/** Iterator class to iterate over a dictionary of usage relations. 
+/** Iterator class to iterate over a dictionary of usage relations.
  */
 class UsesClassDictIterator : public QDictIterator<UsesClassDef>
 {
   public:
-    UsesClassDictIterator(const QDict<UsesClassDef> &d) 
+    UsesClassDictIterator(const QDict<UsesClassDef> &d)
       : QDictIterator<UsesClassDef>(d) {}
    ~UsesClassDictIterator() {}
-};
-
-//------------------------------------------------------------------------
-
-/** Class that contains information about an inheritance relation. 
- */
-struct BaseClassDef
-{
-  BaseClassDef(ClassDef *cd,const char *n,Protection p,
-               Specifier v,const char *t) : 
-        classDef(cd), usedName(n), prot(p), virt(v), templSpecifiers(t) {}
-
-  /** Class definition that this relation inherits from. */
-  ClassDef *classDef;
-
-  /** name used in the inheritance list 
-   * (may be a typedef name instead of the class name)
-   */
-  QCString   usedName; 
-  
-  /** Protection level of the inheritance relation: 
-   *  Public, Protected, or Private 
-   */
-  Protection prot;     
-
-  /** Virtualness of the inheritance relation:
-   *  Normal, or Virtual
-   */
-  Specifier  virt;
-
-  /** Template arguments used for the base class */
-  QCString templSpecifiers;
-};
-
-/** List of base classes.
- *  
- *  The classes are alphabetically sorted on name if inSort() is used.
- */
-class BaseClassList : public QList<BaseClassDef>
-{
-  public:
-   ~BaseClassList() {}
-    int compareValues(const BaseClassDef *item1,const BaseClassDef *item2) const
-    {
-      const ClassDef *c1=item1->classDef;
-      const ClassDef *c2=item2->classDef;
-      if (c1==0 || c2==0)
-        return FALSE;
-      else
-        return qstricmp(c1->name(),c2->name());
-    }
-};
-
-/** Iterator for a list of base classes.
- */
-class BaseClassListIterator : public QListIterator<BaseClassDef>
-{
-  public:
-    BaseClassListIterator(const BaseClassList &bcl) : 
-      QListIterator<BaseClassDef>(bcl) {}
 };
 
 //------------------------------------------------------------------------
@@ -548,17 +524,15 @@ struct ConstraintClassDef
 {
   ConstraintClassDef(ClassDef *cd) : classDef(cd)
   {
-    accessors = new QDict<void>(17);
   }
  ~ConstraintClassDef()
   {
-    delete accessors;
   }
   void addAccessor(const char *s)
   {
-    if (accessors->find(s)==0)
+    if (accessors.find(s)==accessors.end())
     {
-      accessors->insert(s,(void *)666);
+      accessors.insert(s);
     }
   }
   /** Class definition that this relation uses. */
@@ -567,7 +541,7 @@ struct ConstraintClassDef
   /** Dictionary of member types names that form the edge labels of the
    *  constraint relation.
    */
-  QDict<void> *accessors;
+  StringSet accessors;
 };
 
 /** Dictionary of constraint relations.
@@ -575,7 +549,7 @@ struct ConstraintClassDef
 class ConstraintClassDict : public QDict<ConstraintClassDef>
 {
   public:
-    ConstraintClassDict(int size) : QDict<ConstraintClassDef>(size) {}
+    ConstraintClassDict(uint size) : QDict<ConstraintClassDef>(size) {}
    ~ConstraintClassDict() {}
 };
 
